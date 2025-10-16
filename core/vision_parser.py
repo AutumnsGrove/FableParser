@@ -5,7 +5,10 @@ This module handles the parsing of Fable app screenshots to extract
 book lists with titles, authors, and reading status information.
 """
 
+import os
 from typing import List, Dict, Any
+
+from core.llm_inference import LLMInference
 
 
 # Vision prompt template for book extraction
@@ -68,8 +71,35 @@ def parse_screenshot(image_path: str) -> List[Dict[str, Any]]:
         FileNotFoundError: If the image_path does not exist
         ValueError: If the LLM response cannot be parsed
     """
-    # from core.llm_inference import LLMInference
-    # llm = LLMInference()
-    # result = llm.analyze_screenshot(image_path, VISION_PROMPT)
-    # return result["books"]
-    pass
+    # Validate image exists before processing
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Image file not found: {image_path}")
+
+    # Initialize LLM inference client
+    try:
+        llm = LLMInference()
+    except (ValueError, FileNotFoundError) as e:
+        raise ValueError(f"Failed to initialize LLM client: {e}")
+
+    # Analyze screenshot with vision model
+    try:
+        result = llm.analyze_screenshot(image_path, VISION_PROMPT)
+    except Exception as e:
+        raise ValueError(f"Failed to analyze screenshot: {e}")
+
+    # Extract books list from response
+    if "books" not in result:
+        raise ValueError(
+            "Invalid LLM response: missing 'books' key. "
+            f"Response: {result.get('raw_response', 'No raw response available')}"
+        )
+
+    books = result["books"]
+
+    # Validate that we got a list
+    if not isinstance(books, list):
+        raise ValueError(
+            f"Invalid LLM response: 'books' should be a list, got {type(books).__name__}"
+        )
+
+    return books
