@@ -9,6 +9,10 @@ import gradio as gr
 from typing import Tuple, List
 import os
 
+from core import vision_parser, metadata_enricher
+from core import markdown_generator, raindrop_sync, obsidian_sync
+from utils import config_handler
+
 
 def process_pipeline(
     image_path: str,
@@ -46,44 +50,40 @@ def process_pipeline(
     files = []
 
     try:
-        log.append("Analyzing screenshot...")
-
-        # from core import vision_parser, metadata_enricher
-        # from core import markdown_generator, raindrop_sync, obsidian_sync
-        # from utils import config_handler
+        log.append("📸 Analyzing screenshot...")
 
         # Phase 1: Vision Analysis
-        # books = vision_parser.parse_screenshot(image_path)
-        # log.append(f"Found {len(books)} books\n")
+        books = vision_parser.parse_screenshot(image_path)
+        log.append(f"✅ Found {len(books)} books\n")
 
         # Phase 2-4: Process each book
-        # for i, book in enumerate(books, 1):
-        #     log.append(f"Processing {i}/{len(books)}: {book['title']}")
-        #
-        #     # Enrich metadata
-        #     enriched = metadata_enricher.enrich_book_metadata(book)
-        #
-        #     # Generate markdown
-        #     filepath = markdown_generator.generate_markdown_file(enriched)
-        #     files.append(filepath)
-        #     log.append(f"  Created {os.path.basename(filepath)}")
-        #
-        #     # Optional syncs
-        #     if sync_raindrop and config_handler.is_raindrop_enabled():
-        #         rd_id = raindrop_sync.sync_to_raindrop(enriched, filepath)
-        #         log.append(f"  Synced to Raindrop (ID: {rd_id})")
-        #
-        #     if sync_obsidian and config_handler.is_obsidian_enabled():
-        #         obsidian_sync.sync_to_obsidian(filepath)
-        #         log.append(f"  Copied to Obsidian vault")
-        #
-        #     log.append("")
+        for i, book in enumerate(books, 1):
+            log.append(f"📖 Processing {i}/{len(books)}: {book['title']}")
 
-        log.append("All done!")
+            # Enrich metadata
+            enriched = metadata_enricher.enrich_book_metadata(book)
+
+            # Generate markdown
+            filepath = markdown_generator.generate_markdown_file(enriched)
+            files.append(filepath)
+            log.append(f"  ✓ Created {os.path.basename(filepath)}")
+
+            # Optional syncs
+            if sync_raindrop and config_handler.get_config_value("raindrop.enabled"):
+                rd_id = raindrop_sync.sync_to_raindrop(enriched, filepath)
+                log.append(f"  ☁️  Synced to Raindrop (ID: {rd_id})")
+
+            if sync_obsidian and config_handler.get_config_value("obsidian.enabled"):
+                obsidian_sync.sync_to_obsidian(filepath)
+                log.append(f"  📝 Copied to Obsidian vault")
+
+            log.append("")
+
+        log.append("🎉 All done!")
         return "\n".join(log), files
 
     except Exception as e:
-        log.append(f"Error: {str(e)}")
+        log.append(f"❌ Error: {str(e)}")
         return "\n".join(log), []
 
 
@@ -135,7 +135,7 @@ def create_interface() -> gr.Blocks:
         gr.Markdown("### Example Obsidian Path")
         gr.Code(
             value="/Users/username/Documents/Obsidian/MyVault/Books",
-            language="bash",
+            language="shell",
             label="Edit in config.json"
         )
 
