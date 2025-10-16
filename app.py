@@ -18,15 +18,16 @@ from utils import config_handler
 def process_pipeline(
     image_path: str,
     sync_raindrop: bool,
-    sync_obsidian: bool
+    sync_obsidian: bool,
+    progress=gr.Progress()
 ) -> Tuple[str, List[str]]:
     """
     Main processing pipeline for converting screenshots to markdown files.
 
     This function orchestrates the complete workflow:
-    1. Analyze screenshot using vision parser
-    2. Enrich each book with Open Library metadata
-    3. Generate markdown files
+    1. Analyze screenshot using vision parser (0% → 20%)
+    2. Enrich each book with Open Library metadata (20% → 60%)
+    3. Generate markdown files (60% → 100%)
     4. Optionally sync to Raindrop.io
     5. Optionally copy to Obsidian vault
 
@@ -34,6 +35,7 @@ def process_pipeline(
         image_path: Path to uploaded screenshot image
         sync_raindrop: Whether to sync books to Raindrop.io
         sync_obsidian: Whether to copy files to Obsidian vault
+        progress: Gradio Progress object for UI progress bar updates
 
     Returns:
         Tuple of (status_log, list_of_file_paths):
@@ -51,10 +53,12 @@ def process_pipeline(
     files = []
 
     try:
+        # Phase 1: Vision Analysis (0% → 20%)
+        progress(0.0, desc="📸 Analyzing screenshot...")
         log.append("📸 Analyzing screenshot...")
 
-        # Phase 1: Vision Analysis
         books = vision_parser.parse_screenshot(image_path)
+        progress(0.2, desc=f"✅ Found {len(books)} books")
         log.append(f"✅ Found {len(books)} books")
 
         # Debug: Show what we got
@@ -68,7 +72,8 @@ def process_pipeline(
 
         log.append("")  # Blank line for readability
 
-        # Phase 2: Parallel metadata enrichment
+        # Phase 2: Parallel metadata enrichment (20% → 60%)
+        progress(0.2, desc=f"🔍 Enriching metadata for {len(books)} books...")
         log.append(f"🔍 Enriching metadata for {len(books)} books in parallel...")
 
         # Filter out books without required fields
@@ -81,10 +86,14 @@ def process_pipeline(
 
         if not valid_books:
             log.append("❌ No valid books to process")
+            progress(1.0, desc="❌ No valid books to process")
             return "\n".join(log), []
 
         # Enrich all books in parallel using ThreadPoolExecutor
         enriched_books = []
+        total_books = len(valid_books)
+        completed_enrichments = 0
+
         with ThreadPoolExecutor(max_workers=5) as executor:
             # Submit all enrichment tasks
             future_to_book = {
@@ -104,30 +113,47 @@ def process_pipeline(
                     # Use original book data if enrichment fails
                     enriched_books.append((idx, original_book))
 
+                # Update progress: 20% + (40% × completed/total)
+                completed_enrichments += 1
+                progress_pct = 0.2 + (0.4 * completed_enrichments / total_books)
+                progress(progress_pct, desc=f"🔍 Enriching metadata ({completed_enrichments}/{total_books} books)")
+
         # Sort by original index to maintain order
         enriched_books.sort(key=lambda x: x[0])
+        progress(0.6, desc="✅ Metadata enrichment complete")
         log.append(f"✅ Metadata enrichment complete\n")
 
-        # Phase 3-4: Generate markdown files and sync (sequential)
-        for idx, enriched in enriched_books:
+        # Phase 3: Generate markdown files and sync (60% → 100%)
+        total_books_to_process = len(enriched_books)
+
+        for book_num, (idx, enriched) in enumerate(enriched_books, 1):
+            # Calculate base progress for this book: 60% + (40% × book_num/total)
+            base_progress = 0.6 + (0.4 * (book_num - 1) / total_books_to_process)
+            book_progress_range = 0.4 / total_books_to_process  # How much progress this book represents
+
+            progress(base_progress, desc=f"📖 Processing {book_num}/{total_books_to_process}: {enriched.get('title', 'Unknown')}")
             log.append(f"📖 Processing {idx}/{len(books)}: {enriched.get('title', 'Unknown')}")
 
-            # Generate markdown
+            # Generate markdown (33% of this book's progress)
             filepath = markdown_generator.generate_markdown_file(enriched)
             files.append(filepath)
             log.append(f"  ✓ Created {os.path.basename(filepath)}")
+            progress(base_progress + book_progress_range * 0.33, desc=f"📖 Processing {book_num}/{total_books_to_process}: Generated markdown")
 
             # Optional syncs
             if sync_raindrop and config_handler.get_config_value("raindrop.enabled"):
                 rd_id = raindrop_sync.sync_to_raindrop(enriched, filepath)
                 log.append(f"  ☁️  Synced to Raindrop (ID: {rd_id})")
+                progress(base_progress + book_progress_range * 0.66, desc=f"📖 Processing {book_num}/{total_books_to_process}: Synced to Raindrop")
 
             if sync_obsidian and config_handler.get_config_value("obsidian.enabled"):
                 obsidian_sync.sync_to_obsidian(filepath)
                 log.append(f"  📝 Copied to Obsidian vault")
+                progress(base_progress + book_progress_range * 0.9, desc=f"📖 Processing {book_num}/{total_books_to_process}: Copied to Obsidian")
 
             log.append("")
 
+        progress(1.0, desc="🎉 All done!")
         log.append("🎉 All done!")
         return "\n".join(log), files
 
