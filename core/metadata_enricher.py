@@ -89,26 +89,78 @@ def enrich_book_metadata(book: Dict[str, Any]) -> Dict[str, Any]:
             enriched_book['metadata_source'] = 'No Open Library match'
             return enriched_book
 
-        # Extract ISBNs
-        isbns = result.get('isbn', [])
+        # Extract work ID from search result
+        work_id = result.get('key')
 
-        # Separate ISBN-10 and ISBN-13
-        isbn_10 = next((isbn for isbn in isbns if len(isbn) == 10), None)
-        isbn_13 = next((isbn for isbn in isbns if len(isbn) == 13), None)
+        # Initialize metadata variables
+        isbn_13 = None
+        isbn_10 = None
+        publisher = None
+        publish_date = None
+        pages = None
 
-        # Use ISBN-13 as primary, fallback to first available ISBN
-        primary_isbn = isbn_13 or isbn_10 or (isbns[0] if isbns else None)
+        # Try to fetch edition details for more complete metadata
+        if work_id:
+            edition = _fetch_edition_details(work_id)
+            if edition:
+                # Extract ISBN-13 from edition
+                isbn_13_list = edition.get('isbn_13', [])
+                isbn_13 = isbn_13_list[0] if isbn_13_list else None
+
+                # Extract ISBN-10 from edition
+                isbn_10_list = edition.get('isbn_10', [])
+                isbn_10 = isbn_10_list[0] if isbn_10_list else None
+
+                # Extract publisher from edition
+                publishers = edition.get('publishers', [])
+                publisher = publishers[0] if publishers else None
+
+                # Extract publish date from edition
+                publish_date = edition.get('publish_date')
+
+                # Extract page count from edition
+                pages = edition.get('number_of_pages')
+
+        # Fallback to search result if edition fetch failed
+        if not isbn_13 and not isbn_10:
+            isbns = result.get('isbn', [])
+            isbn_10 = next((isbn for isbn in isbns if len(isbn) == 10), None)
+            isbn_13 = next((isbn for isbn in isbns if len(isbn) == 13), None)
+
+        if not publisher:
+            publisher = result.get('publisher', [None])[0] if result.get('publisher') else None
+
+        if not pages:
+            pages = result.get('number_of_pages_median')
+
+        # Use ISBN-13 as primary, fallback to ISBN-10
+        primary_isbn = isbn_13 or isbn_10
+
+        # Get cover URL - try ISBN first, then cover_i from search
+        cover_url = _get_cover_url(primary_isbn)
+        if not cover_url:
+            cover_i = result.get('cover_i')
+            if cover_i:
+                cover_url = f"https://covers.openlibrary.org/b/id/{cover_i}-L.jpg"
+
+        # Parse publish year from publish_date if available
+        publish_year = result.get('first_publish_year')
+        if not publish_year and publish_date:
+            # Try to extract year from publish_date string
+            import re
+            year_match = re.search(r'\b(19|20)\d{2}\b', str(publish_date))
+            if year_match:
+                publish_year = int(year_match.group())
 
         # Enrich book metadata
         enriched_book.update({
-            'isbn': primary_isbn,
+            'isbn': isbn_13,
             'isbn_10': isbn_10,
-            'cover_url': _get_cover_url(primary_isbn),
-            'publisher': result.get('publisher', [None])[0] if result.get('publisher') else None,
-            'publish_year': result.get('first_publish_year') or
-                            (result.get('publish_year', [None])[0] if result.get('publish_year') else None),
-            'pages': result.get('number_of_pages_median'),
-            'open_library_id': result.get('key'),
+            'cover_url': cover_url,
+            'publisher': publisher,
+            'publish_year': publish_year,
+            'pages': pages,
+            'open_library_id': work_id,
             'metadata_source': 'Open Library'
         })
 
@@ -157,6 +209,65 @@ def _search_open_library(title: str, author: str) -> Optional[Dict[str, Any]]:
 
     except requests.exceptions.RequestException as e:
         logger.warning(f"Open Library API request failed: {e}")
+        return None
+
+
+def _fetch_edition_details(work_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetch edition details from Open Library editions endpoint.
+
+    Args:
+        work_id: Open Library work ID (e.g., "/works/OL17267887W")
+
+    Returns:
+        Edition metadata with ISBN, publisher, pages, publish_date, or None if not found
+    """
+    try:
+        # Construct editions API URL
+        url = f"https://openlibrary.org{work_id}/editions.json"
+
+        # Make request with timeout
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+
+        # Parse JSON response
+        data = response.json()
+
+        # Get entries (editions list)
+        editions = data.get('entries', [])
+
+        if not editions:
+            return None
+
+        # Find the edition with the most complete metadata
+        best_edition = None
+        best_score = 0
+
+        for edition in editions:
+            # Score based on available fields
+            score = 0
+            if edition.get('isbn_13'):
+                score += 3
+            if edition.get('isbn_10'):
+                score += 2
+            if edition.get('publishers'):
+                score += 2
+            if edition.get('number_of_pages'):
+                score += 2
+            if edition.get('publish_date'):
+                score += 1
+
+            if score > best_score:
+                best_score = score
+                best_edition = edition
+
+        return best_edition
+
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Open Library editions API request failed: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error parsing edition details: {e}")
         return None
 
 

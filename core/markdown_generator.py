@@ -194,7 +194,7 @@ def _build_markdown_body(book: Dict[str, Any]) -> str:
         links.append(f"- [Open Library](https://openlibrary.org/isbn/{book['isbn_10']})")
 
     if book.get("open_library_id"):
-        links.append(f"- [Open Library Work](https://openlibrary.org/works/{book['open_library_id']})")
+        links.append(f"- [Open Library Work](https://openlibrary.org{book['open_library_id']})")
 
     if links:
         sections.append("## Links")
