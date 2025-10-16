@@ -1,0 +1,32 @@
+# Secrets
+secrets.json
+*.env
+
+# API Keys
+anthropic_key.txt
+raindrop_token.txt
+
+# Input/Output
+input/*.png
+input/*.jpg
+input/*.jpeg
+output/*.md
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# UV
+.python-version

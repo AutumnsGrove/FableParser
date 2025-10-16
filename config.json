@@ -1,0 +1,38 @@
+{
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 4000,
+    "temperature": 0.3
+  },
+  "output": {
+    "directory": "./output",
+    "filename_format": "{author_last}_{title_slug}",
+    "date_format": "%Y-%m-%d"
+  },
+  "obsidian": {
+    "enabled": false,
+    "vault_path": "/Users/username/Documents/Obsidian/MyVault/Books",
+    "create_index": true
+  },
+  "raindrop": {
+    "enabled": false,
+    "collection_id": null,
+    "default_tags": ["books", "fable-import"]
+  },
+  "metadata": {
+    "default_status": "want-to-read",
+    "include_cover_image": true,
+    "fetch_timeout": 10
+  },
+  "frontmatter_fields": [
+    "title",
+    "author",
+    "isbn",
+    "cover_url",
+    "source",
+    "date_added",
+    "status",
+    "reading_status"
+  ]
+}
