@@ -8,6 +8,7 @@ interface for uploading screenshots and processing book lists.
 import gradio as gr
 from typing import Tuple, List
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core import vision_parser, metadata_enricher
 from core import markdown_generator, raindrop_sync, obsidian_sync
@@ -67,17 +68,49 @@ def process_pipeline(
 
         log.append("")  # Blank line for readability
 
-        # Phase 2-4: Process each book
+        # Phase 2: Parallel metadata enrichment
+        log.append(f"🔍 Enriching metadata for {len(books)} books in parallel...")
+
+        # Filter out books without required fields
+        valid_books = []
         for i, book in enumerate(books, 1):
-            # Validate book has required fields
             if 'title' not in book:
                 log.append(f"⚠️  Skipping book {i}: missing 'title' field")
-                continue
+            else:
+                valid_books.append((i, book))
 
-            log.append(f"📖 Processing {i}/{len(books)}: {book.get('title', 'Unknown')}")
+        if not valid_books:
+            log.append("❌ No valid books to process")
+            return "\n".join(log), []
 
-            # Enrich metadata
-            enriched = metadata_enricher.enrich_book_metadata(book)
+        # Enrich all books in parallel using ThreadPoolExecutor
+        enriched_books = []
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            # Submit all enrichment tasks
+            future_to_book = {
+                executor.submit(metadata_enricher.enrich_book_metadata, book): (idx, book)
+                for idx, book in valid_books
+            }
+
+            # Collect results as they complete
+            for future in as_completed(future_to_book):
+                idx, original_book = future_to_book[future]
+                try:
+                    enriched = future.result()
+                    enriched_books.append((idx, enriched))
+                    log.append(f"  ✓ Enriched: {enriched.get('title', 'Unknown')}")
+                except Exception as e:
+                    log.append(f"  ⚠️  Failed to enrich book {idx}: {str(e)}")
+                    # Use original book data if enrichment fails
+                    enriched_books.append((idx, original_book))
+
+        # Sort by original index to maintain order
+        enriched_books.sort(key=lambda x: x[0])
+        log.append(f"✅ Metadata enrichment complete\n")
+
+        # Phase 3-4: Generate markdown files and sync (sequential)
+        for idx, enriched in enriched_books:
+            log.append(f"📖 Processing {idx}/{len(books)}: {enriched.get('title', 'Unknown')}")
 
             # Generate markdown
             filepath = markdown_generator.generate_markdown_file(enriched)
