@@ -12,6 +12,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Open Library API requires User-Agent header for regular use
+# https://openlibrary.org/developers/api
+HEADERS = {
+    "User-Agent": "FableParser/1.0 (https://github.com/autumnsgrove/FableParser; autumnbrown23@pm.me)"
+}
+
 
 def enrich_book_metadata(book: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -194,8 +200,8 @@ def _search_open_library(title: str, author: str) -> Optional[Dict[str, Any]]:
         # Construct API URL
         url = f"https://openlibrary.org/search.json?title={encoded_title}&author={encoded_author}"
 
-        # Make request with timeout
-        response = requests.get(url, timeout=10)
+        # Make request with timeout and required User-Agent header
+        response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()  # Raise exception for bad status codes
 
         # Parse JSON response
@@ -226,8 +232,8 @@ def _fetch_edition_details(work_id: str) -> Optional[Dict[str, Any]]:
         # Construct editions API URL
         url = f"https://openlibrary.org{work_id}/editions.json"
 
-        # Make request with timeout
-        response = requests.get(url, timeout=10)
+        # Make request with timeout and required User-Agent header
+        response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
 
         # Parse JSON response
