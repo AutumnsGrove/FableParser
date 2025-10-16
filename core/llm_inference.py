@@ -198,9 +198,21 @@ class LLMInference:
         Raises:
             json.JSONDecodeError: If response cannot be parsed as JSON
         """
+        # Strip markdown code blocks if present (common with Claude responses)
+        cleaned_response = raw_response.strip()
+
+        # Remove markdown JSON code blocks like ```json ... ```
+        if cleaned_response.startswith('```'):
+            # Find the first newline after opening ```
+            start_idx = cleaned_response.find('\n')
+            # Find the closing ```
+            end_idx = cleaned_response.rfind('```')
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                cleaned_response = cleaned_response[start_idx+1:end_idx].strip()
+
         # Try to parse as JSON
         try:
-            parsed = json.loads(raw_response)
+            parsed = json.loads(cleaned_response)
 
             # Ensure required fields exist
             if "books" not in parsed:
@@ -214,13 +226,13 @@ class LLMInference:
 
             return parsed
 
-        except json.JSONDecodeError:
-            # If not valid JSON, return error structure
+        except json.JSONDecodeError as e:
+            # If not valid JSON, return error structure with more details
             return {
                 "books": [],
                 "confidence": 0.0,
                 "raw_response": raw_response,
-                "error": "Failed to parse response as JSON"
+                "error": f"Failed to parse response as JSON: {str(e)}"
             }
 
     def _initialize_client(self):

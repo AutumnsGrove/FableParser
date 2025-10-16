@@ -21,13 +21,15 @@ Extract all visible books with their:
 3. Reading status (infer from visual indicators like shelves/lists)
    - Options: "read", "currently-reading", "want-to-read", "unknown"
 
-INSTRUCTIONS:
+CRITICAL INSTRUCTIONS:
 - Be precise with titles and authors
 - If a book is partially visible, include it if title is readable
-- Return structured JSON only
-- If you see shelf/list names like "Want to Read", use that for status
+- Return ONLY valid JSON - no markdown, no code blocks, no explanations
+- Do NOT wrap the JSON in ```json``` code blocks
+- Just return the raw JSON object
+- If you see shelf/list names like "Currently Reading" or "Want to Read", map to appropriate status
 
-OUTPUT FORMAT:
+EXACT OUTPUT FORMAT (return this structure only):
 {
   "books": [
     {

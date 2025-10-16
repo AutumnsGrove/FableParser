@@ -54,11 +54,27 @@ def process_pipeline(
 
         # Phase 1: Vision Analysis
         books = vision_parser.parse_screenshot(image_path)
-        log.append(f"✅ Found {len(books)} books\n")
+        log.append(f"✅ Found {len(books)} books")
+
+        # Debug: Show what we got
+        if len(books) == 0:
+            log.append("⚠️  Warning: No books were extracted from the screenshot")
+            log.append("This might be due to:")
+            log.append("  - Unclear image quality")
+            log.append("  - Unexpected screenshot format")
+            log.append("  - JSON parsing issues")
+            return "\n".join(log), []
+
+        log.append("")  # Blank line for readability
 
         # Phase 2-4: Process each book
         for i, book in enumerate(books, 1):
-            log.append(f"📖 Processing {i}/{len(books)}: {book['title']}")
+            # Validate book has required fields
+            if 'title' not in book:
+                log.append(f"⚠️  Skipping book {i}: missing 'title' field")
+                continue
+
+            log.append(f"📖 Processing {i}/{len(books)}: {book.get('title', 'Unknown')}")
 
             # Enrich metadata
             enriched = metadata_enricher.enrich_book_metadata(book)
