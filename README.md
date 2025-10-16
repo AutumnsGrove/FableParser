@@ -26,7 +26,7 @@ Convert Fable book list screenshots into structured markdown files with YAML fro
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/fable-to-markdown
+   git clone https://github.com/AutumnsGrove/fable-to-markdown
    cd fable-to-markdown
    ```
 
@@ -317,8 +317,8 @@ MIT License - See LICENSE file for details.
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/fable-to-markdown/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/fable-to-markdown/discussions)
+- **Issues**: [GitHub Issues](https://github.com/AutumnsGrove/fable-to-markdown/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/AutumnsGrove/fable-to-markdown/discussions)
 
 ## Acknowledgments
 

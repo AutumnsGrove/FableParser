@@ -697,7 +697,7 @@ black==24.10.0
 ### Installation
 ```bash
 # Clone repo
-git clone https://github.com/yourusername/fable-to-markdown
+git clone https://github.com/AutumnsGrove/fable-to-markdown
 cd fable-to-markdown
 
 # Install dependencies
