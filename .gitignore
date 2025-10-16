@@ -30,3 +30,8 @@ build/
 
 # UV
 .python-version
+
+# Test coverage
+.coverage
+htmlcov/
+
