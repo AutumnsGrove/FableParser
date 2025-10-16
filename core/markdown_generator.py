@@ -8,6 +8,11 @@ YAML frontmatter containing metadata and formatted content sections.
 from typing import Dict, Any
 import os
 from datetime import datetime
+from pathlib import Path
+import yaml
+from slugify import slugify
+
+from utils.config_handler import get_output_directory, get_config_value
 
 
 def generate_markdown_file(book: Dict[str, Any]) -> str:
@@ -50,7 +55,34 @@ def generate_markdown_file(book: Dict[str, Any]) -> str:
         ValueError: If required fields (title, author) are missing
         OSError: If file cannot be written
     """
-    pass
+    # Validate required fields
+    if not book.get("title"):
+        raise ValueError("Book metadata must include 'title' field")
+    if not book.get("author"):
+        raise ValueError("Book metadata must include 'author' field")
+
+    # Build file components
+    frontmatter = _build_frontmatter(book)
+    body = _build_markdown_body(book)
+    filename = _generate_filename(book)
+
+    # Get output directory and create if it doesn't exist
+    output_dir = get_output_directory()
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    # Build full file path
+    filepath = os.path.join(output_dir, filename)
+
+    # Write file with UTF-8 encoding
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(frontmatter)
+            f.write('\n')
+            f.write(body)
+    except OSError as e:
+        raise OSError(f"Failed to write markdown file to {filepath}: {e}")
+
+    return os.path.abspath(filepath)
 
 
 def _build_frontmatter(book: Dict[str, Any]) -> str:
@@ -63,7 +95,33 @@ def _build_frontmatter(book: Dict[str, Any]) -> str:
     Returns:
         YAML frontmatter string (including --- delimiters)
     """
-    pass
+    # Get configured frontmatter fields
+    frontmatter_fields = get_config_value("frontmatter_fields", [])
+
+    # Build frontmatter dictionary with only configured fields
+    frontmatter_data = {}
+    for field in frontmatter_fields:
+        if field in book:
+            frontmatter_data[field] = book[field]
+
+    # Add date_added if not present
+    if "date_added" not in frontmatter_data:
+        date_format = get_config_value("output.date_format", "%Y-%m-%d")
+        frontmatter_data["date_added"] = datetime.now().strftime(date_format)
+
+    # Add source if not present
+    if "source" not in frontmatter_data:
+        frontmatter_data["source"] = "fable"
+
+    # Convert to YAML and wrap with delimiters
+    yaml_content = yaml.dump(
+        frontmatter_data,
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False
+    )
+
+    return f"---\n{yaml_content}---"
 
 
 def _build_markdown_body(book: Dict[str, Any]) -> str:
@@ -76,7 +134,80 @@ def _build_markdown_body(book: Dict[str, Any]) -> str:
     Returns:
         Formatted markdown content string
     """
-    pass
+    sections = []
+
+    # Title header
+    sections.append(f"# {book['title']}")
+    sections.append("")
+
+    # Basic information
+    info_lines = []
+    if book.get("author"):
+        info_lines.append(f"**Author:** {book['author']}")
+
+    if book.get("isbn"):
+        info_lines.append(f"**ISBN-13:** {book['isbn']}")
+    elif book.get("isbn_10"):
+        info_lines.append(f"**ISBN-10:** {book['isbn_10']}")
+
+    # Publisher and year
+    publisher_info = []
+    if book.get("publisher"):
+        publisher_info.append(book["publisher"])
+    if book.get("publish_year"):
+        publisher_info.append(f"({book['publish_year']})")
+
+    if publisher_info:
+        info_lines.append(f"**Publisher:** {' '.join(publisher_info)}")
+
+    if info_lines:
+        sections.extend(info_lines)
+        sections.append("")
+
+    # Cover image
+    if book.get("cover_url"):
+        sections.append(f"![Book Cover]({book['cover_url']})")
+        sections.append("")
+
+    # Reading status section
+    reading_status = book.get("reading_status", "").lower()
+    status_emoji_map = {
+        "want-to-read": "📚 Want to Read",
+        "currently-reading": "📖 Currently Reading",
+        "read": "✅ Read"
+    }
+
+    status_display = status_emoji_map.get(
+        reading_status,
+        f"📚 {reading_status.replace('-', ' ').title()}"
+    )
+
+    sections.append("## Reading Status")
+    sections.append(status_display)
+    sections.append("")
+
+    # Links section
+    links = []
+    if book.get("isbn"):
+        links.append(f"- [Open Library](https://openlibrary.org/isbn/{book['isbn']})")
+    elif book.get("isbn_10"):
+        links.append(f"- [Open Library](https://openlibrary.org/isbn/{book['isbn_10']})")
+
+    if book.get("open_library_id"):
+        links.append(f"- [Open Library Work](https://openlibrary.org/works/{book['open_library_id']})")
+
+    if links:
+        sections.append("## Links")
+        sections.extend(links)
+        sections.append("")
+
+    # Footer
+    sections.append("---")
+    sections.append("")
+    today = datetime.now().strftime("%B %d, %Y")
+    sections.append(f"*Imported from Fable on {today}*")
+
+    return "\n".join(sections)
 
 
 def _generate_filename(book: Dict[str, Any]) -> str:
@@ -91,7 +222,32 @@ def _generate_filename(book: Dict[str, Any]) -> str:
     Returns:
         Sanitized filename string
     """
-    pass
+    # Get filename format from config
+    filename_format = get_config_value(
+        "output.filename_format",
+        "{author_last}_{title_slug}"
+    )
+
+    # Extract author last name
+    author = book.get("author", "unknown")
+    author_parts = author.split()
+    author_last = author_parts[-1] if author_parts else "unknown"
+
+    # Create slugs
+    author_last_slug = _slugify_text(author_last)
+    title_slug = _slugify_text(book.get("title", "untitled"))
+
+    # Format filename
+    filename = filename_format.format(
+        author_last=author_last_slug,
+        title_slug=title_slug
+    )
+
+    # Ensure .md extension
+    if not filename.endswith(".md"):
+        filename += ".md"
+
+    return filename
 
 
 def _slugify_text(text: str) -> str:
@@ -104,4 +260,4 @@ def _slugify_text(text: str) -> str:
     Returns:
         Slugified text (lowercase, hyphens, no special chars)
     """
-    pass
+    return slugify(text, lowercase=True)
