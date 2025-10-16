@@ -138,9 +138,9 @@ class LLMInference:
             return parsed_data
 
         except anthropic.APIError as e:
-            raise anthropic.APIError(
-                f"Anthropic API request failed: {e}"
-            )
+            raise ValueError(
+                f"Anthropic API request failed: {str(e)}"
+            ) from e
         except json.JSONDecodeError as e:
             raise json.JSONDecodeError(
                 f"Failed to parse LLM response as JSON: {e.msg}",
