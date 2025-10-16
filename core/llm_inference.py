@@ -52,6 +52,68 @@ class LLMInference:
         # Initialize provider-specific client
         self.client = self._initialize_client()
 
+    def analyze_text(
+        self,
+        text: str,
+        prompt: str,
+        model: Optional[str] = None,
+        max_tokens: int = 4000
+    ) -> Dict[str, Any]:
+        """
+        Analyze text using LLM to extract book information.
+
+        Args:
+            text: The OCR-extracted text to analyze
+            prompt: The prompt template for text analysis
+            model: Optional model override (uses config default if None)
+            max_tokens: Maximum tokens for the response (default: 4000)
+
+        Returns:
+            A dictionary containing:
+                - books: List of extracted book dictionaries with title, author, reading_status
+                - confidence: Confidence score for the extraction (0.0-1.0)
+                - raw_response: Raw text response from the LLM
+
+        Raises:
+            ValueError: If the API request fails
+            json.JSONDecodeError: If the response cannot be parsed as JSON
+        """
+        # Use provided model or default from config
+        model_name = model or self.default_model
+
+        # Combine the text with the prompt
+        full_prompt = f"{prompt}\n\nEXTRACTED TEXT FROM SCREENSHOT:\n\n{text}"
+
+        try:
+            # Make text-only API request to Anthropic
+            response = self.client.messages.create(
+                model=model_name,
+                max_tokens=max_tokens,
+                messages=[{
+                    "role": "user",
+                    "content": full_prompt
+                }]
+            )
+
+            # Extract text response
+            raw_response = response.content[0].text
+
+            # Parse JSON response from LLM
+            parsed_data = self._parse_llm_response(raw_response)
+
+            return parsed_data
+
+        except anthropic.APIError as e:
+            raise ValueError(
+                f"Anthropic API request failed: {str(e)}"
+            ) from e
+        except json.JSONDecodeError as e:
+            raise json.JSONDecodeError(
+                f"Failed to parse LLM response as JSON: {e.msg}",
+                e.doc,
+                e.pos
+            )
+
     def analyze_screenshot(
         self,
         image_path: str,
