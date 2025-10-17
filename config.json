@@ -4,7 +4,8 @@
     "default_model": "claude-sonnet-4-5-20250929",
     "models": {
       "text_parsing": "claude-sonnet-4-5-20250929",
-      "vision_analysis": "claude-sonnet-4-5-20250929"
+      "vision_analysis": "claude-sonnet-4-5-20250929",
+      "title_variation": "claude-3-5-haiku-20241022"
     },
     "max_tokens": 8000,
     "temperature": 0.3

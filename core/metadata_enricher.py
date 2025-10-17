@@ -14,6 +14,7 @@ import json
 from functools import wraps
 
 from core.llm_inference import LLMInference
+from utils.config_handler import get_llm_model
 
 logger = logging.getLogger(__name__)
 
@@ -419,9 +420,11 @@ Examples:
         # Initialize LLM for title variation generation
         llm = LLMInference()
 
-        # Use a small, fast model for this task
+        # Use configured model for title variations (defaults to Haiku for speed/cost)
+        variation_model = get_llm_model("title_variation")
+
         response = llm.client.messages.create(
-            model="claude-3-5-haiku-20241022",  # Fast, cheap model for simple tasks
+            model=variation_model,
             max_tokens=200,
             messages=[{
                 "role": "user",
