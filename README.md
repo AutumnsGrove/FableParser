@@ -5,14 +5,20 @@ Convert Fable book list screenshots into structured markdown files with YAML fro
 ## Features
 
 - **Vision-based parsing**: Extract book titles and authors from screenshots using Claude AI
+- **Intelligent title search**: LLM-powered title variation matching with live progress updates
 - **Metadata enrichment**: Automatically fetch ISBN, cover images, publisher info, and more from Open Library
+- **Smart duplicate detection**: Skip API calls for books already in your collection (performance optimization)
 - **Markdown generation**: Create beautiful markdown files with YAML frontmatter
 - **Reading status detection**: Automatically detect read/currently-reading/want-to-read status
+- **Chunked processing**: Handle large screenshots efficiently with automatic image splitting
+- **Live UI updates**: Real-time progress tracking with progressive file preview
+- **Metadata refresh**: Update existing markdown files with latest Open Library data
+- **Flexible renaming**: Batch rename existing files to match new filename formats
 - **Multiple export options**:
   - Local filesystem output
   - Obsidian vault sync
   - Raindrop.io bookmark sync
-- **Web interface**: Easy-to-use Gradio UI for uploading and processing screenshots
+- **Web interface**: Easy-to-use Gradio UI with live progress indicators
 
 ## Quick Start
 
@@ -255,33 +261,37 @@ See `FABLEPARSER_PROJECT_SPEC.md` for detailed technical specifications.
 
 ## Limitations
 
-- **Screenshot Quality**: Accuracy depends on image clarity
-- **API Rate Limits**: Open Library has soft rate limits
-- **Cover Images**: Not all books have covers available
-- **Reading Status**: Inferred from visual cues (may not be 100% accurate)
-- **Duplicate Detection**: Not implemented in v1.0
+- **Screenshot Quality**: Accuracy depends on image clarity (mitigated by automatic image preprocessing)
+- **API Rate Limits**: Open Library has soft rate limits (mitigated by duplicate detection and smart caching)
+- **Cover Images**: Not all books have covers available via Open Library
+- **Reading Status**: Inferred from visual cues (generally accurate but may require manual verification)
 
-## Roadmap
+## Version History
 
-### v1.0 (Current)
-- ✅ Core screenshot parsing
-- ✅ Open Library integration
-- ✅ Markdown generation
+### v1.0 (Stable - Complete)
+- ✅ Core screenshot parsing with vision AI
+- ✅ Open Library integration with intelligent search
+- ✅ Markdown generation with YAML frontmatter
 - ✅ Raindrop.io sync
-- ✅ Obsidian sync
+- ✅ Obsidian vault sync
+- ✅ Chunked LLM processing for large images
+- ✅ Automatic image splitting (JPEG-to-PNG conversion)
+- ✅ Live UI progress updates with progressive file preview
+- ✅ Smart duplicate detection (skip existing books)
+- ✅ Metadata refresh tool for updating existing files
+- ✅ Batch rename utility for filename format updates
+- ✅ Configurable title variation model
+- ✅ Immediate one-by-one markdown generation
 
-### v2.0 (Planned)
-- [ ] Batch processing (multiple screenshots)
-- [ ] Custom tag rules
-- [ ] Reading notes field
-- [ ] Export to CSV/JSON/Notion
-- [ ] Duplicate detection
+**Status:** Project is complete and production-ready. All core features implemented and tested.
 
-### v3.0 (Future)
-- [ ] Direct Fable API integration
-- [ ] Auto-tagging using LLM
-- [ ] Update existing markdown files
-- [ ] Chrome extension for one-click capture
+### Future Enhancements (Optional)
+If community interest exists, potential additions could include:
+- Custom tag rules engine
+- Reading notes field
+- Export to CSV/JSON/Notion
+- Direct Fable API integration (if/when available)
+- Chrome extension for one-click capture
 
 ## Troubleshooting
 
