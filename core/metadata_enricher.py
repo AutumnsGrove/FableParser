@@ -255,6 +255,11 @@ def _search_open_library(title: str, author: str) -> Optional[Dict[str, Any]]:
     """
     Search Open Library by title and author with retry logic and rate limiting.
 
+    Tries multiple search strategies:
+    1. Exact title + author search
+    2. Title without leading articles (The, A, An) + author
+    3. Combined keyword search (more lenient)
+
     Args:
         title: Book title
         author: Author name
@@ -262,18 +267,26 @@ def _search_open_library(title: str, author: str) -> Optional[Dict[str, Any]]:
     Returns:
         First matching book data from Open Library, or None if not found
     """
-    # URL encode title and author
-    encoded_title = urllib.parse.quote(title)
-    encoded_author = urllib.parse.quote(author)
+    # Strategy 1: Try exact title and author
+    result = _try_search(title, author)
+    if result:
+        return result
 
-    # Construct API URL
-    url = f"https://openlibrary.org/search.json?title={encoded_title}&author={encoded_author}"
+    # Strategy 2: Try removing leading articles ("The", "A", "An")
+    title_without_article = _remove_leading_article(title)
+    if title_without_article != title:
+        result = _try_search(title_without_article, author)
+        if result:
+            return result
 
-    # Make request with timeout and required User-Agent header
+    # Strategy 3: Try combined keyword search (more lenient)
+    # This uses the general 'q' parameter instead of separate title/author
+    encoded_query = urllib.parse.quote(f"{title} {author}")
+    url = f"https://openlibrary.org/search.json?q={encoded_query}"
+
     response = requests.get(url, headers=HEADERS, timeout=15)
-    response.raise_for_status()  # Raise exception for bad status codes
+    response.raise_for_status()
 
-    # Parse JSON response
     data = response.json()
 
     # Return first result if available
@@ -281,6 +294,68 @@ def _search_open_library(title: str, author: str) -> Optional[Dict[str, Any]]:
         return data['docs'][0]
 
     return None
+
+
+def _try_search(title: str, author: str) -> Optional[Dict[str, Any]]:
+    """
+    Attempt a single Open Library search with title and author parameters.
+
+    This is a helper function called by _search_open_library and should NOT
+    have its own rate limiting (that's handled by the parent function).
+
+    Args:
+        title: Book title
+        author: Author name
+
+    Returns:
+        First matching book or None (never raises exceptions)
+    """
+    try:
+        # URL encode title and author
+        encoded_title = urllib.parse.quote(title)
+        encoded_author = urllib.parse.quote(author)
+
+        # Construct API URL
+        url = f"https://openlibrary.org/search.json?title={encoded_title}&author={encoded_author}"
+
+        # Make request with timeout and required User-Agent header
+        response = requests.get(url, headers=HEADERS, timeout=15)
+        response.raise_for_status()
+
+        # Parse JSON response
+        data = response.json()
+
+        # Return first result if available
+        if data.get('docs') and len(data['docs']) > 0:
+            return data['docs'][0]
+
+    except Exception:
+        # Silently fail and let parent function try other strategies
+        pass
+
+    return None
+
+
+def _remove_leading_article(title: str) -> str:
+    """
+    Remove leading articles (The, A, An) from book title.
+
+    Args:
+        title: Book title
+
+    Returns:
+        Title without leading article
+
+    Examples:
+        "The Great Gatsby" → "Great Gatsby"
+        "A Tale of Two Cities" → "Tale of Two Cities"
+        "An American Tragedy" → "American Tragedy"
+    """
+    articles = ['The ', 'A ', 'An ', 'THE ', 'A ', 'AN ']
+    for article in articles:
+        if title.startswith(article):
+            return title[len(article):]
+    return title
 
 
 @rate_limit
