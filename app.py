@@ -8,7 +8,6 @@ interface for uploading screenshots and processing book lists.
 import gradio as gr
 from typing import Tuple, List
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core import vision_parser, metadata_enricher
 from core import markdown_generator, raindrop_sync, obsidian_sync
@@ -72,9 +71,9 @@ def process_pipeline(
 
         log.append("")  # Blank line for readability
 
-        # Phase 2: Parallel metadata enrichment (20% → 60%)
+        # Phase 2: Sequential metadata enrichment (20% → 60%)
         progress(0.2, desc=f"🔍 Enriching metadata for {len(books)} books...")
-        log.append(f"🔍 Enriching metadata for {len(books)} books in parallel...")
+        log.append(f"🔍 Enriching metadata for {len(books)} books sequentially...")
 
         # Filter out books without required fields
         valid_books = []
@@ -89,37 +88,23 @@ def process_pipeline(
             progress(1.0, desc="❌ No valid books to process")
             return "\n".join(log), []
 
-        # Enrich all books in parallel using ThreadPoolExecutor
+        # Enrich all books sequentially to respect API rate limits
         enriched_books = []
         total_books = len(valid_books)
-        completed_enrichments = 0
 
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            # Submit all enrichment tasks
-            future_to_book = {
-                executor.submit(metadata_enricher.enrich_book_metadata, book): (idx, book)
-                for idx, book in valid_books
-            }
+        for completed_enrichments, (idx, book) in enumerate(valid_books, 1):
+            try:
+                enriched = metadata_enricher.enrich_book_metadata(book)
+                enriched_books.append((idx, enriched))
+                log.append(f"  ✓ Enriched: {enriched.get('title', 'Unknown')}")
+            except Exception as e:
+                log.append(f"  ⚠️  Failed to enrich book {idx}: {str(e)}")
+                # Use original book data if enrichment fails
+                enriched_books.append((idx, book))
 
-            # Collect results as they complete
-            for future in as_completed(future_to_book):
-                idx, original_book = future_to_book[future]
-                try:
-                    enriched = future.result()
-                    enriched_books.append((idx, enriched))
-                    log.append(f"  ✓ Enriched: {enriched.get('title', 'Unknown')}")
-                except Exception as e:
-                    log.append(f"  ⚠️  Failed to enrich book {idx}: {str(e)}")
-                    # Use original book data if enrichment fails
-                    enriched_books.append((idx, original_book))
-
-                # Update progress: 20% + (40% × completed/total)
-                completed_enrichments += 1
-                progress_pct = 0.2 + (0.4 * completed_enrichments / total_books)
-                progress(progress_pct, desc=f"🔍 Enriching metadata ({completed_enrichments}/{total_books} books)")
-
-        # Sort by original index to maintain order
-        enriched_books.sort(key=lambda x: x[0])
+            # Update progress: 20% + (40% × completed/total)
+            progress_pct = 0.2 + (0.4 * completed_enrichments / total_books)
+            progress(progress_pct, desc=f"🔍 Enriching metadata ({completed_enrichments}/{total_books} books)")
         progress(0.6, desc="✅ Metadata enrichment complete")
         log.append(f"✅ Metadata enrichment complete\n")
 
