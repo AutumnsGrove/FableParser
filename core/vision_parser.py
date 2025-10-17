@@ -103,8 +103,8 @@ def parse_screenshot(image_path: str, use_ocr: bool = True) -> List[Dict[str, An
             ocr = OCRExtractor()
             # Preprocess image if needed (resize large images)
             processed_path = ocr.preprocess_image(image_path, max_dimension=4000)
-            # Extract text from image
-            extracted_text = ocr.extract_text(processed_path)
+            # Extract text from image (debug=True saves OCR output to file)
+            extracted_text = ocr.extract_text(processed_path, debug=True)
 
             # Clean up temporary file if created
             if processed_path != image_path and os.path.exists(processed_path):

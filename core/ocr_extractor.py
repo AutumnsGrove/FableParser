@@ -39,12 +39,13 @@ class OCRExtractor:
             # Enable GPU for faster processing (uses MPS on Mac M-series chips)
             self.reader = easyocr.Reader(self.languages, gpu=True)
 
-    def extract_text(self, image_path: str) -> str:
+    def extract_text(self, image_path: str, debug: bool = False) -> str:
         """
         Extract all text from an image using OCR.
 
         Args:
             image_path: Path to the image file
+            debug: If True, save extracted text to a debug file
 
         Returns:
             Extracted text as a single string with newlines preserved
@@ -66,14 +67,30 @@ class OCRExtractor:
         # Ensure reader is initialized
         self._ensure_reader_initialized()
 
-        # Run OCR on the image
+        # Run OCR on the image - disable paragraph mode for better line-by-line extraction
         print(f"🔍 Running OCR on {os.path.basename(image_path)}...")
-        results = self.reader.readtext(image_path, detail=0, paragraph=True)
+        results = self.reader.readtext(image_path, detail=1, paragraph=False)
 
-        # Combine all text blocks with newlines
-        extracted_text = "\n".join(results)
+        # Sort results by vertical position (top to bottom) for proper reading order
+        # Each result is: (bounding_box, text, confidence)
+        results_sorted = sorted(results, key=lambda x: x[0][0][1])  # Sort by top-left Y coordinate
 
-        print(f"✅ Extracted {len(extracted_text)} characters of text")
+        # Extract just the text from each result
+        extracted_text = "\n".join([text for _, text, _ in results_sorted])
+
+        print(f"✅ Extracted {len(extracted_text)} characters of text from {len(results_sorted)} text blocks")
+
+        # Debug mode: save extracted text to file
+        if debug:
+            debug_file = str(Path(image_path).with_suffix('.ocr_debug.txt'))
+            with open(debug_file, 'w', encoding='utf-8') as f:
+                f.write("=== OCR EXTRACTED TEXT ===\n\n")
+                f.write(extracted_text)
+                f.write("\n\n=== DETAILED RESULTS ===\n\n")
+                for i, (bbox, text, conf) in enumerate(results_sorted, 1):
+                    f.write(f"{i}. [{conf:.2f}] {text}\n")
+            print(f"📝 Debug info saved to {debug_file}")
+
         return extracted_text
 
     def preprocess_image(self, image_path: str, max_dimension: int = 4000) -> str:
