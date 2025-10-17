@@ -1,7 +1,11 @@
 {
   "llm": {
     "provider": "anthropic",
-    "model": "claude-sonnet-4-5-20250929",
+    "default_model": "claude-sonnet-4-5-20250929",
+    "models": {
+      "text_parsing": "claude-sonnet-4-5-20250929",
+      "vision_analysis": "claude-sonnet-4-5-20250929"
+    },
     "max_tokens": 4000,
     "temperature": 0.3
   },
