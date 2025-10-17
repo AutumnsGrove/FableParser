@@ -247,10 +247,12 @@ def create_interface() -> gr.Blocks:
         )
 
         # Connect the processing function
+        # show_progress="minimal" keeps progress visible but doesn't overlay output components
         process_btn.click(
             fn=process_pipeline,
             inputs=[image_input, sync_raindrop, sync_obsidian],
-            outputs=[status_output, files_output]
+            outputs=[status_output, files_output],
+            show_progress="minimal"
         )
 
     return app
