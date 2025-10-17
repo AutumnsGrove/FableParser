@@ -7,6 +7,7 @@ YAML frontmatter containing metadata and formatted content sections.
 
 from typing import Dict, Any
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 import yaml
@@ -319,7 +320,8 @@ def _generate_filename(book: Dict[str, Any]) -> str:
     """
     Generate filename from book metadata.
 
-    Uses format: {author_last}_{title_slug}.md
+    Uses format: {FirstInitialLastName--TitleInCamelCase}.md
+    Example: BSanderson--TheWayOfKings.md
 
     Args:
         book: Book metadata dictionary
@@ -327,32 +329,64 @@ def _generate_filename(book: Dict[str, Any]) -> str:
     Returns:
         Sanitized filename string
     """
-    # Get filename format from config
-    filename_format = get_config_value(
-        "output.filename_format",
-        "{author_last}_{title_slug}"
-    )
-
-    # Extract author last name
+    # Extract author name parts
     author = book.get("author", "unknown")
     author_parts = author.split()
-    author_last = author_parts[-1] if author_parts else "unknown"
 
-    # Create slugs
-    author_last_slug = _slugify_text(author_last)
-    title_slug = _slugify_text(book.get("title", "untitled"))
+    if len(author_parts) == 0:
+        # No author name
+        author_prefix = "Unknown"
+    elif len(author_parts) == 1:
+        # Only one name (could be first or last)
+        author_prefix = author_parts[0].capitalize()
+    else:
+        # Multiple parts: use first initial + last name
+        first_initial = author_parts[0][0].upper()
+        last_name = author_parts[-1].capitalize()
+        author_prefix = f"{first_initial}{last_name}"
 
-    # Format filename
-    filename = filename_format.format(
-        author_last=author_last_slug,
-        title_slug=title_slug
-    )
+    # Convert title to CamelCase (PascalCase)
+    title = book.get("title", "Untitled")
+    title_camel = _to_camel_case(title)
 
-    # Ensure .md extension
-    if not filename.endswith(".md"):
-        filename += ".md"
+    # Combine with double dash separator
+    filename = f"{author_prefix}--{title_camel}.md"
 
     return filename
+
+
+def _to_camel_case(text: str) -> str:
+    """
+    Convert text to CamelCase (PascalCase) for filenames.
+
+    Removes special characters and capitalizes each word.
+
+    Args:
+        text: Text to convert
+
+    Returns:
+        CamelCase text (e.g., "The Way of Kings" -> "TheWayOfKings")
+
+    Examples:
+        >>> _to_camel_case("The Way of Kings")
+        "TheWayOfKings"
+        >>> _to_camel_case("Project Hail Mary")
+        "ProjectHailMary"
+        >>> _to_camel_case("Harry Potter and the Philosopher's Stone")
+        "HarryPotterAndThePhilosophersStone"
+    """
+    # Replace common separators with spaces
+    text = text.replace('-', ' ').replace('_', ' ')
+
+    # Remove possessive apostrophes and other punctuation
+    text = re.sub(r"'s\b", 's', text)  # "Author's" -> "Authors"
+    text = re.sub(r"[^\w\s]", '', text)  # Remove remaining punctuation
+
+    # Split into words and capitalize each
+    words = text.split()
+    camel_words = [word.capitalize() for word in words if word]
+
+    return ''.join(camel_words)
 
 
 def _slugify_text(text: str) -> str:

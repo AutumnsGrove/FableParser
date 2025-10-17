@@ -357,7 +357,7 @@ class OCRExtractor:
             traceback.print_exc()
             raise
 
-    def extract_text(self, image_path: str, debug: bool = False) -> str:
+    def extract_text(self, image_path: str, debug: bool = False, return_chunks: bool = False) -> str | list[str]:
         """
         Extract all text from an image using OCR with Tesseract 5.
 
@@ -366,9 +366,11 @@ class OCRExtractor:
         Args:
             image_path: Path to the image file
             debug: If True, save extracted text to a debug file with confidence scores
+            return_chunks: If True, return a list of text strings (one per chunk) instead of combining
 
         Returns:
-            Extracted text as a single string with newlines preserved
+            If return_chunks=False (default): Extracted text as a single combined string
+            If return_chunks=True: List of text strings, one per image chunk
 
         Raises:
             FileNotFoundError: If the image file does not exist
@@ -379,6 +381,11 @@ class OCRExtractor:
             >>> text = extractor.extract_text("screenshot.png")
             >>> print(text)
             "Finished\\n31 books\\nThe Way of Kings\\nBrandon Sanderson\\n..."
+
+            >>> # For chunked processing
+            >>> chunks = extractor.extract_text("huge_screenshot.png", return_chunks=True)
+            >>> print(len(chunks))  # Number of chunks
+            9
         """
         # Validate image exists
         if not os.path.exists(image_path):
@@ -422,13 +429,18 @@ class OCRExtractor:
                             f.write(f"{i}. [{conf:.2%}] {text}\n")
                     print(f"📝 Debug info saved to {debug_file}")
 
-            # Combine all chunks
-            combined_text = "\n".join(all_text)
-
-            if len(chunk_paths) > 1:
-                print(f"\n✅ Combined text from {len(chunk_paths)} chunks: {len(combined_text)} total characters")
-
-            return combined_text
+            # Return chunks separately or combined based on parameter
+            if return_chunks:
+                # Return list of text strings for separate processing
+                if len(chunk_paths) > 1:
+                    print(f"\n✅ Returning {len(all_text)} text chunks for separate processing")
+                return all_text
+            else:
+                # Combine all chunks into single string (original behavior)
+                combined_text = "\n".join(all_text)
+                if len(chunk_paths) > 1:
+                    print(f"\n✅ Combined text from {len(chunk_paths)} chunks: {len(combined_text)} total characters")
+                return combined_text
 
         except Exception as e:
             raise ValueError(f"OCR processing failed for {image_path}: {str(e)}") from e

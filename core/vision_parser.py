@@ -125,22 +125,56 @@ def parse_screenshot(image_path: str, use_ocr: bool = True) -> List[Dict[str, An
         raise ValueError(f"Failed to initialize LLM client: {e}")
 
     if use_ocr:
-        # NEW APPROACH: OCR + Text Analysis
+        # NEW APPROACH: OCR + Text Analysis (with chunked processing)
         # Step 1: Extract text using OCR (handles splitting internally for large images)
         try:
             ocr = OCRExtractor()
-            # Extract text from image (debug=True saves OCR output to file)
+            # Extract text from image and get chunks separately for large images
             # This automatically splits very large images into chunks if needed
-            extracted_text = ocr.extract_text(image_path, debug=True)
+            extracted_text = ocr.extract_text(image_path, debug=True, return_chunks=True)
+
+            # Check if we got chunks (list) or single text (string)
+            if isinstance(extracted_text, list):
+                text_chunks = extracted_text
+                print(f"📦 Processing {len(text_chunks)} text chunks separately through LLM...")
+            else:
+                # Single chunk, wrap in list
+                text_chunks = [extracted_text]
 
         except Exception as e:
             raise ValueError(f"Failed to extract text from screenshot: {e}")
 
-        # Step 2: Parse extracted text with LLM
-        try:
-            result = llm.analyze_text(extracted_text, TEXT_PARSING_PROMPT)
-        except Exception as e:
-            raise ValueError(f"Failed to parse extracted text: {e}")
+        # Step 2: Parse each text chunk with LLM separately to avoid overloading
+        all_books = []
+        for chunk_idx, chunk_text in enumerate(text_chunks, 1):
+            if len(text_chunks) > 1:
+                chars = len(chunk_text)
+                print(f"  🔍 Chunk {chunk_idx}/{len(text_chunks)}: Sending {chars} characters to LLM...")
+
+            try:
+                result = llm.analyze_text(chunk_text, TEXT_PARSING_PROMPT)
+
+                # Extract books from this chunk
+                if "books" in result and isinstance(result["books"], list):
+                    chunk_books = result["books"]
+                    all_books.extend(chunk_books)
+                    if len(text_chunks) > 1:
+                        print(f"    ✓ Extracted {len(chunk_books)} books from chunk {chunk_idx}")
+                else:
+                    if len(text_chunks) > 1:
+                        print(f"    ⚠️  No books found in chunk {chunk_idx}")
+
+            except Exception as e:
+                print(f"    ⚠️  LLM parsing failed for chunk {chunk_idx}: {e}")
+                # Continue with other chunks even if one fails
+                continue
+
+        # Combine results from all chunks
+        if len(text_chunks) > 1:
+            print(f"✅ Combined {len(all_books)} total books from {len(text_chunks)} chunks")
+
+        # Create result dict matching expected format
+        result = {"books": all_books}
     else:
         # LEGACY APPROACH: Vision API (kept for backwards compatibility)
         try:
