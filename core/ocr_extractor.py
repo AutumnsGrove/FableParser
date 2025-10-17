@@ -35,8 +35,8 @@ class OCRExtractor:
         """
         self.languages = languages or ['en']
         # Tesseract config: PSM 6 (assume single uniform block of text)
-        # --oem 3 (use both legacy and neural network OCR)
-        self.tesseract_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=""'
+        # --oem 3 (use default OCR engine mode - LSTM only for better accuracy)
+        self.tesseract_config = r'--oem 3 --psm 6'
 
     def _preprocess_image_cv2(self, image_path: str) -> np.ndarray:
         """
@@ -44,9 +44,8 @@ class OCRExtractor:
 
         Applies:
         1. Grayscale conversion
-        2. OTSU thresholding for better text detection
-        3. Optional denoising
-        4. Optional deskewing
+        2. Simple scaling/normalization
+        3. Light denoising if needed
 
         Args:
             image_path: Path to the image file
@@ -63,15 +62,14 @@ class OCRExtractor:
         # Convert to grayscale
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        # Apply OTSU thresholding for binary image
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        # For dark mode screenshots, invert colors so text is black on white
+        # Check if the image is dark mode by looking at average pixel value
+        avg_brightness = np.mean(gray)
+        if avg_brightness < 127:  # Dark mode (dark background)
+            gray = cv2.bitwise_not(gray)  # Invert to make text black on white
 
-        # Denoise the binary image
-        denoised = cv2.medianBlur(binary, 3)
-
-        # Optional: Apply morphological operations to improve text connectivity
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        processed = cv2.morphologyEx(denoised, cv2.MORPH_CLOSE, kernel, iterations=1)
+        # Light denoising to reduce noise while preserving text clarity
+        processed = cv2.fastNlMeansDenoising(gray, None, h=10, templateWindowSize=7, searchWindowSize=21)
 
         return processed
 
