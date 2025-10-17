@@ -19,31 +19,48 @@ from core.ocr_extractor import OCRExtractor
 # Text parsing prompt template for book extraction
 TEXT_PARSING_PROMPT = """You are analyzing text extracted from a Fable reading app screenshot showing a list of books.
 
+FABLE APP TEXT LAYOUT PATTERN:
+In Fable screenshots, each book entry follows this pattern:
+1. Book Title (larger text)
+2. Author Name, Translator (smaller text on the next line)
+3. Optional metadata: page count, dates, etc.
+
+EXAMPLE TEXT PATTERNS YOU'LL SEE:
+```
+Colorless Tsukuru Tazaki and His Years of Pilgrimage
+Haruki Murakami, Philip Gabriel
+400 pages    Jul 16, 2025 - Aug 25, 2...
+
+The Martian
+Andy Weir
+369 pages
+```
+
 TASK:
-Parse the extracted text to identify all books with their:
-1. Title (exact as shown)
-2. Author name (exact as shown)
-3. Reading status (infer from context like shelf/list names)
-   - Options: "read", "currently-reading", "want-to-read", "unknown"
+Extract ALL books with:
+1. **title**: Exact book title (first line of each entry)
+2. **author**: Full author name (second line - ALWAYS present in Fable)
+   - If you see a translator (after comma), include ONLY the primary author
+   - Example: "Haruki Murakami, Philip Gabriel" → use "Haruki Murakami"
+3. **reading_status**: Infer from shelf name
+   - "Finished" → "read"
+   - "Currently Reading" → "currently-reading"
+   - "Want to Read" / other → "want-to-read"
 
-CRITICAL INSTRUCTIONS:
-- Look for patterns like:
-  - Book titles followed by author names
-  - Shelf/list indicators like "Finished", "Currently Reading", "Want to Read"
-  - Page counts, dates, or other metadata (ignore these)
-- Be precise with titles and authors - extract them exactly as they appear
-- If a book appears partially, include it if both title and author are readable
-- Return ONLY valid JSON - no markdown, no code blocks, no explanations
-- Do NOT wrap the JSON in ```json``` code blocks
-- Just return the raw JSON object
+CRITICAL RULES:
+- **NEVER use "unknown" for author** - Fable ALWAYS shows the author name
+- If author appears cut off or unclear, try to extract what's visible
+- Look for the line IMMEDIATELY AFTER the title - that's the author
+- Ignore page counts, dates, and other metadata
+- Be precise - extract names exactly as shown
 
-EXACT OUTPUT FORMAT (return this structure only):
+OUTPUT FORMAT (raw JSON only, no markdown):
 {
   "books": [
     {
-      "title": "The Way of Kings",
-      "author": "Brandon Sanderson",
-      "reading_status": "want-to-read"
+      "title": "Colorless Tsukuru Tazaki and His Years of Pilgrimage",
+      "author": "Haruki Murakami",
+      "reading_status": "read"
     }
   ]
 }
@@ -140,4 +157,37 @@ def parse_screenshot(image_path: str, use_ocr: bool = True) -> List[Dict[str, An
             f"Invalid LLM response: 'books' should be a list, got {type(books).__name__}"
         )
 
-    return books
+    # Post-processing: Clean up and validate book entries
+    cleaned_books = []
+    for book in books:
+        # Ensure required fields exist
+        if 'title' not in book:
+            continue  # Skip books without titles
+
+        # Clean up author field
+        author = book.get('author', 'unknown').strip()
+
+        # If author is unknown/empty, try to extract from title
+        if author.lower() in ['unknown', 'n/a', 'none', '']:
+            # Check if title contains "by [Author]" pattern
+            title = book.get('title', '')
+            if ' by ' in title.lower():
+                parts = title.split(' by ', 1)
+                book['title'] = parts[0].strip()
+                book['author'] = parts[1].strip()
+            else:
+                # Keep as unknown if we can't extract
+                book['author'] = 'unknown'
+        else:
+            # Clean up author: remove translator if present
+            if ',' in author:
+                author = author.split(',')[0].strip()
+            book['author'] = author
+
+        # Ensure reading_status exists
+        if 'reading_status' not in book:
+            book['reading_status'] = 'unknown'
+
+        cleaned_books.append(book)
+
+    return cleaned_books

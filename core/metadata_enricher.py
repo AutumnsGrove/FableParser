@@ -150,9 +150,9 @@ def enrich_book_metadata(book: Dict[str, Any]) -> Dict[str, Any]:
         title = book.get('title', '')
         author = book.get('author', '')
 
-        # Skip enrichment if no title or author
-        if not title or not author:
-            enriched_book['metadata_source'] = 'No title/author for enrichment'
+        # Skip enrichment if no title or author is missing/unknown
+        if not title or not author or author.lower() in ['unknown', 'n/a', 'none', '']:
+            enriched_book['metadata_source'] = f'Skipped: title={bool(title)}, author={author or "empty"}'
             return enriched_book
 
         # Search Open Library
