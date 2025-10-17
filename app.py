@@ -94,7 +94,11 @@ def process_pipeline(
 
         for completed_enrichments, (idx, book) in enumerate(valid_books, 1):
             try:
-                enriched = metadata_enricher.enrich_book_metadata(book)
+                # Define callback to capture search progress messages
+                def search_progress(msg: str):
+                    log.append(f"    {msg}")
+
+                enriched = metadata_enricher.enrich_book_metadata(book, progress_callback=search_progress)
                 enriched_books.append((idx, enriched))
                 log.append(f"  ✓ Enriched: {enriched.get('title', 'Unknown')}")
             except Exception as e:

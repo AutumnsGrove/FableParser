@@ -5,12 +5,15 @@ This module handles querying the Open Library API to fetch additional
 metadata such as ISBN, cover images, publisher info, and page counts.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import requests
 import urllib.parse
 import logging
 import time
+import json
 from functools import wraps
+
+from core.llm_inference import LLMInference
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +90,7 @@ HEADERS = {
 }
 
 
-def enrich_book_metadata(book: Dict[str, Any]) -> Dict[str, Any]:
+def enrich_book_metadata(book: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
     """
     Query Open Library API to enrich book metadata.
 
@@ -155,8 +158,8 @@ def enrich_book_metadata(book: Dict[str, Any]) -> Dict[str, Any]:
             enriched_book['metadata_source'] = f'Skipped: title={bool(title)}, author={author or "empty"}'
             return enriched_book
 
-        # Search Open Library
-        result = _search_open_library(title, author)
+        # Search Open Library with progress callback
+        result = _search_open_library(title, author, progress_callback=progress_callback)
 
         # If no result found, return original book with note
         if not result:
@@ -251,36 +254,51 @@ def enrich_book_metadata(book: Dict[str, Any]) -> Dict[str, Any]:
 
 @rate_limit
 @retry_on_failure(max_retries=3, backoff_factor=1.5)
-def _search_open_library(title: str, author: str) -> Optional[Dict[str, Any]]:
+def _search_open_library(title: str, author: str, progress_callback=None) -> Optional[Dict[str, Any]]:
     """
-    Search Open Library by title and author with retry logic and rate limiting.
+    Search Open Library by title and author with intelligent retry logic.
 
-    Tries multiple search strategies:
-    1. Exact title + author search
-    2. Title without leading articles (The, A, An) + author
-    3. Combined keyword search (more lenient)
+    Uses LLM-powered title variation generation for smarter searching:
+    1. Try exact title + author search
+    2. Generate 2-3 intelligent title variations using LLM
+    3. Try each variation
+    4. Fall back to combined keyword search
 
     Args:
         title: Book title
         author: Author name
+        progress_callback: Optional callback function for UI updates (takes string message)
 
     Returns:
         First matching book data from Open Library, or None if not found
     """
+    def report(msg: str):
+        if progress_callback:
+            progress_callback(msg)
+        print(f"  🔍 {msg}")
+
     # Strategy 1: Try exact title and author
+    report(f"Searching: '{title}'")
     result = _try_search(title, author)
     if result:
+        report(f"✓ Found match!")
         return result
 
-    # Strategy 2: Try removing leading articles ("The", "A", "An")
-    title_without_article = _remove_leading_article(title)
-    if title_without_article != title:
-        result = _try_search(title_without_article, author)
-        if result:
-            return result
+    # Strategy 2: Use LLM to generate intelligent title variations
+    report(f"Generating search variations...")
+    variations = _generate_title_variations(title, author)
 
-    # Strategy 3: Try combined keyword search (more lenient)
-    # This uses the general 'q' parameter instead of separate title/author
+    if variations:
+        report(f"Trying {len(variations)} variation(s)...")
+        for i, variation in enumerate(variations, 1):
+            report(f"Attempt {i}/{len(variations)}: '{variation}'")
+            result = _try_search(variation, author)
+            if result:
+                report(f"✓ Found match with: '{variation}'")
+                return result
+
+    # Strategy 3: Try combined keyword search (most lenient fallback)
+    report(f"Trying fuzzy search...")
     encoded_query = urllib.parse.quote(f"{title} {author}")
     url = f"https://openlibrary.org/search.json?q={encoded_query}"
 
@@ -291,8 +309,10 @@ def _search_open_library(title: str, author: str) -> Optional[Dict[str, Any]]:
 
     # Return first result if available
     if data.get('docs') and len(data['docs']) > 0:
+        report(f"✓ Found match (fuzzy search)")
         return data['docs'][0]
 
+    report(f"✗ No matches found")
     return None
 
 
@@ -356,6 +376,87 @@ def _remove_leading_article(title: str) -> str:
         if title.startswith(article):
             return title[len(article):]
     return title
+
+
+def _generate_title_variations(title: str, author: str) -> List[str]:
+    """
+    Use LLM to generate intelligent title variations for Open Library search.
+
+    The LLM analyzes the book title and generates likely variations that might
+    match in Open Library's database, handling subtitles, series info, etc.
+
+    Args:
+        title: Original book title as extracted from screenshot
+        author: Author name for context
+
+    Returns:
+        List of 2-3 title variations to try (excluding the original)
+
+    Example:
+        Input: "The Station: A Novel (The Eta Chronicles Book 1)"
+        Output: ["The Station", "Station", "The Eta Chronicles"]
+    """
+    prompt = f"""Given this book title extracted from a reading app, generate 2-3 alternative title variations that might be used in library databases.
+
+Book: "{title}" by {author}
+
+Common issues to address:
+- Remove subtitles (e.g., ": A Novel", ": A Memoir")
+- Remove series information (e.g., "(Book 1)", "(The Eta Chronicles)")
+- Try with/without leading articles (The, A, An)
+- Extract just the main title or series name
+
+Output ONLY a JSON array of 2-3 alternative titles, no explanation:
+["variation 1", "variation 2", "variation 3"]
+
+Examples:
+"The Station: A Novel (The Eta Chronicles Book 1)" → ["The Station", "Station", "The Eta Chronicles"]
+"The Guest List" → ["Guest List", "Guest List"]
+"Project Hail Mary" → ["Project Hail Mary"]
+"""
+
+    try:
+        # Initialize LLM for title variation generation
+        llm = LLMInference()
+
+        # Use a small, fast model for this task
+        response = llm.client.messages.create(
+            model="claude-3-5-haiku-20241022",  # Fast, cheap model for simple tasks
+            max_tokens=200,
+            messages=[{
+                "role": "user",
+                "content": prompt
+            }]
+        )
+
+        # Parse response
+        raw_response = response.content[0].text.strip()
+
+        # Clean up JSON if wrapped in markdown
+        if raw_response.startswith('```'):
+            start_idx = raw_response.find('[')
+            end_idx = raw_response.rfind(']') + 1
+            if start_idx != -1 and end_idx > start_idx:
+                raw_response = raw_response[start_idx:end_idx]
+
+        # Parse JSON array
+        variations = json.loads(raw_response)
+
+        # Filter out the original title and return unique variations
+        unique_variations = []
+        for var in variations:
+            if var != title and var not in unique_variations:
+                unique_variations.append(var)
+
+        return unique_variations[:3]  # Max 3 variations
+
+    except Exception as e:
+        logger.warning(f"Failed to generate LLM title variations: {e}")
+        # Fallback to simple article removal
+        fallback = _remove_leading_article(title)
+        if fallback != title:
+            return [fallback]
+        return []
 
 
 @rate_limit
