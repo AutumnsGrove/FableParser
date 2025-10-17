@@ -3,6 +3,8 @@ gradio==5.0.0
 anthropic==0.39.0
 requests==2.32.3
 Pillow==10.4.0
+pytesseract==0.3.10
+opencv-python==4.8.1.78
 
 # Utilities
 python-slugify==8.0.4
