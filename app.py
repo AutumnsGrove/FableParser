@@ -105,9 +105,9 @@ def process_pipeline(
 
         log.append("")  # Blank line for readability
 
-        # Phase 2: Sequential metadata enrichment (20% → 60%)
-        progress(0.2, desc=f"🔍 Enriching metadata for {len(books)} books...")
-        log.append(f"🔍 Enriching metadata for {len(books)} books sequentially...")
+        # Phase 2: Enrich + Generate files sequentially (20% → 100%)
+        progress(0.2, desc=f"📚 Processing {len(books)} books...")
+        log.append(f"📚 Processing {len(books)} books (enrich + generate)...\n")
 
         # Filter out books without required fields
         valid_books = []
@@ -122,67 +122,61 @@ def process_pipeline(
             progress(1.0, desc="❌ No valid books to process")
             return "\n".join(log), []
 
-        # Enrich all books sequentially to respect API rate limits
-        enriched_books = []
+        # Process each book: enrich + generate file immediately
         total_books = len(valid_books)
 
-        for completed_enrichments, (idx, book) in enumerate(valid_books, 1):
+        for book_num, (idx, book) in enumerate(valid_books, 1):
+            # Calculate progress for this book: 20% + (80% × book_num/total)
+            base_progress = 0.2 + (0.8 * (book_num - 1) / total_books)
+            book_progress_range = 0.8 / total_books
+
             try:
+                log.append(f"📖 {book_num}/{total_books}: {book.get('title', 'Unknown')}")
+
                 # Check if file already exists before making API calls
                 existing_data, existing_path = _check_existing_file(book)
 
                 if existing_data:
                     # Use existing metadata from file
-                    enriched_books.append((idx, existing_data))
-                    log.append(f"  ⏭️  Skipped: {book.get('title', 'Unknown')} (already exists)")
+                    enriched = existing_data
+                    log.append(f"  ⏭️  Using existing file (skipped API)")
+                    # Still add to files list so user can download it
+                    if existing_path:
+                        files.append(existing_path)
                 else:
                     # Define callback to capture search progress messages
                     def search_progress(msg: str):
                         log.append(f"    {msg}")
 
+                    # Enrich metadata
+                    progress(base_progress + book_progress_range * 0.3, desc=f"🔍 Enriching {book_num}/{total_books}")
                     enriched = metadata_enricher.enrich_book_metadata(book, progress_callback=search_progress)
-                    enriched_books.append((idx, enriched))
-                    log.append(f"  ✓ Enriched: {enriched.get('title', 'Unknown')}")
+                    log.append(f"  ✓ Enriched metadata")
+
+                    # Generate markdown immediately after enrichment
+                    progress(base_progress + book_progress_range * 0.6, desc=f"📝 Creating file {book_num}/{total_books}")
+                    filepath = markdown_generator.generate_markdown_file(enriched)
+                    files.append(filepath)
+                    log.append(f"  ✓ Created: {os.path.basename(filepath)}")
+
+                # Optional syncs
+                if sync_raindrop and config_handler.get_config_value("raindrop.enabled"):
+                    rd_id = raindrop_sync.sync_to_raindrop(enriched, filepath)
+                    log.append(f"  ☁️  Synced to Raindrop (ID: {rd_id})")
+                    progress(base_progress + book_progress_range * 0.8, desc=f"☁️ Syncing {book_num}/{total_books}")
+
+                if sync_obsidian and config_handler.get_config_value("obsidian.enabled"):
+                    obsidian_sync.sync_to_obsidian(filepath)
+                    log.append(f"  📝 Copied to Obsidian vault")
+                    progress(base_progress + book_progress_range * 0.9, desc=f"📂 Copying {book_num}/{total_books}")
+
             except Exception as e:
-                log.append(f"  ⚠️  Failed to enrich book {idx}: {str(e)}")
-                # Use original book data if enrichment fails
-                enriched_books.append((idx, book))
+                log.append(f"  ⚠️  Error: {str(e)}")
 
-            # Update progress: 20% + (40% × completed/total)
-            progress_pct = 0.2 + (0.4 * completed_enrichments / total_books)
-            progress(progress_pct, desc=f"🔍 Enriching metadata ({completed_enrichments}/{total_books} books)")
-        progress(0.6, desc="✅ Metadata enrichment complete")
-        log.append(f"✅ Metadata enrichment complete\n")
+            log.append("")  # Blank line between books
 
-        # Phase 3: Generate markdown files and sync (60% → 100%)
-        total_books_to_process = len(enriched_books)
-
-        for book_num, (idx, enriched) in enumerate(enriched_books, 1):
-            # Calculate base progress for this book: 60% + (40% × book_num/total)
-            base_progress = 0.6 + (0.4 * (book_num - 1) / total_books_to_process)
-            book_progress_range = 0.4 / total_books_to_process  # How much progress this book represents
-
-            progress(base_progress, desc=f"📖 Processing {book_num}/{total_books_to_process}: {enriched.get('title', 'Unknown')}")
-            log.append(f"📖 Processing {idx}/{len(books)}: {enriched.get('title', 'Unknown')}")
-
-            # Generate markdown (33% of this book's progress)
-            filepath = markdown_generator.generate_markdown_file(enriched)
-            files.append(filepath)
-            log.append(f"  ✓ Created {os.path.basename(filepath)}")
-            progress(base_progress + book_progress_range * 0.33, desc=f"📖 Processing {book_num}/{total_books_to_process}: Generated markdown")
-
-            # Optional syncs
-            if sync_raindrop and config_handler.get_config_value("raindrop.enabled"):
-                rd_id = raindrop_sync.sync_to_raindrop(enriched, filepath)
-                log.append(f"  ☁️  Synced to Raindrop (ID: {rd_id})")
-                progress(base_progress + book_progress_range * 0.66, desc=f"📖 Processing {book_num}/{total_books_to_process}: Synced to Raindrop")
-
-            if sync_obsidian and config_handler.get_config_value("obsidian.enabled"):
-                obsidian_sync.sync_to_obsidian(filepath)
-                log.append(f"  📝 Copied to Obsidian vault")
-                progress(base_progress + book_progress_range * 0.9, desc=f"📖 Processing {book_num}/{total_books_to_process}: Copied to Obsidian")
-
-            log.append("")
+            # Update progress after this book is complete
+            progress(base_progress + book_progress_range, desc=f"📚 Processing {book_num}/{total_books} books")
 
         progress(1.0, desc="🎉 All done!")
         log.append("🎉 All done!")
