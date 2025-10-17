@@ -82,7 +82,11 @@ def mock_config(tmp_path):
     return {
         "llm": {
             "provider": "anthropic",
-            "model": "claude-sonnet-4-20250514",
+            "default_model": "claude-sonnet-4-5-20250929",
+            "models": {
+                "text_parsing": "claude-sonnet-4-5-20250929",
+                "vision_analysis": "claude-sonnet-4-5-20250929"
+            },
             "max_tokens": 4000
         },
         "output": {
@@ -535,13 +539,21 @@ class TestConfigHandler:
         # Load config first
         config_handler.load_config(str(config_path))
 
-        # Test dot notation
-        model = config_handler.get_config_value("llm.model")
-        assert model == "claude-sonnet-4-20250514"
+        # Test dot notation for default_model
+        model = config_handler.get_config_value("llm.default_model")
+        assert model == "claude-sonnet-4-5-20250929"
 
         # Test nested access
         output_format = config_handler.get_config_value("output.filename_format")
         assert output_format == "{author_last}_{title_slug}"
+
+        # Test new get_llm_model function
+        default_model = config_handler.get_llm_model()
+        assert default_model == "claude-sonnet-4-5-20250929"
+
+        # Test task-specific model lookup
+        text_model = config_handler.get_llm_model("text_parsing")
+        assert text_model == "claude-sonnet-4-5-20250929"
 
     def test_get_config_value_returns_default(self, tmp_path, mock_config):
         """Test that get_config_value returns default if key not found."""
@@ -938,15 +950,15 @@ class TestLLMInference:
     """Tests for LLM inference module."""
 
     @patch('core.llm_inference.get_key')
-    @patch('core.llm_inference.get_config_value')
+    @patch('core.llm_inference.get_llm_model')
     @patch('core.llm_inference.anthropic.Anthropic')
-    def test_llm_inference_initialization(self, mock_anthropic, mock_config, mock_get_key):
+    def test_llm_inference_initialization(self, mock_anthropic, mock_get_llm_model, mock_get_key):
         """Test that LLMInference initializes correctly."""
         from core.llm_inference import LLMInference
 
         # Setup mocks
         mock_get_key.return_value = "test-api-key"
-        mock_config.return_value = "claude-sonnet-4-20250514"
+        mock_get_llm_model.return_value = "claude-sonnet-4-5-20250929"
 
         # Initialize
         llm = LLMInference()
@@ -957,31 +969,31 @@ class TestLLMInference:
         mock_anthropic.assert_called_once()
 
     @patch('core.llm_inference.get_key')
-    @patch('core.llm_inference.get_config_value')
-    def test_llm_inference_unsupported_provider(self, mock_config, mock_get_key):
+    @patch('core.llm_inference.get_llm_model')
+    def test_llm_inference_unsupported_provider(self, mock_get_llm_model, mock_get_key):
         """Test that unsupported provider raises ValueError."""
         from core.llm_inference import LLMInference
 
         # Setup mocks
         mock_get_key.return_value = "test-key"
-        mock_config.return_value = "test-model"
+        mock_get_llm_model.return_value = "test-model"
 
         # Should raise ValueError for unsupported provider
         with pytest.raises(ValueError, match="Unsupported provider"):
             LLMInference(provider="unsupported_provider")
 
     @patch('core.llm_inference.get_key')
-    @patch('core.llm_inference.get_config_value')
+    @patch('core.llm_inference.get_llm_model')
     @patch('core.llm_inference.anthropic.Anthropic')
     def test_analyze_screenshot_returns_structured_data(
-        self, mock_anthropic, mock_config, mock_get_key, sample_screenshot_path
+        self, mock_anthropic, mock_get_llm_model, mock_get_key, sample_screenshot_path
     ):
         """Test that analyze_screenshot returns properly structured data."""
         from core.llm_inference import LLMInference
 
         # Setup mocks
         mock_get_key.return_value = "test-key"
-        mock_config.return_value = "claude-sonnet-4-20250514"
+        mock_get_llm_model.return_value = "claude-sonnet-4-5-20250929"
 
         # Mock Anthropic client response
         mock_client = Mock()

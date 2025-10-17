@@ -113,7 +113,7 @@ def validate_config(config: Dict[str, Any]) -> bool:
         ValueError: If critical configuration fields are missing
     """
     required_fields = {
-        'llm': ['provider', 'model'],
+        'llm': ['provider'],  # Removed 'model' - now supports both 'model' and 'default_model'
         'output': ['directory', 'filename_format'],
         'obsidian': ['enabled'],
         'raindrop': ['enabled']
@@ -131,6 +131,16 @@ def validate_config(config: Dict[str, Any]) -> bool:
         for field in fields:
             if field not in config[section]:
                 missing_fields.append(f"Field '{section}.{field}' is missing")
+
+    # Special handling for LLM model configuration
+    # Support both old 'model' and new 'default_model' fields for backward compatibility
+    if 'llm' in config:
+        has_model = 'model' in config['llm']
+        has_default_model = 'default_model' in config['llm']
+        if not (has_model or has_default_model):
+            missing_fields.append(
+                "Field 'llm.model' or 'llm.default_model' is missing (one is required)"
+            )
 
     # If any required fields are missing, raise ValueError
     if missing_fields:
@@ -184,3 +194,49 @@ def is_raindrop_enabled() -> bool:
         True if enabled, False otherwise
     """
     return get_config_value("raindrop.enabled", False)
+
+
+def get_llm_model(task_type: Optional[str] = None) -> str:
+    """
+    Get the LLM model to use for a specific task or the default model.
+
+    This function provides flexible model selection:
+    - If task_type is provided, returns task-specific model from config if available
+    - Falls back to default_model or legacy 'model' field
+    - Ensures backward compatibility with old config format
+
+    Args:
+        task_type: Optional task type (e.g., 'text_parsing', 'vision_analysis')
+                  If not provided, returns the default model
+
+    Returns:
+        The model ID string (e.g., 'claude-sonnet-4-5-20250929')
+
+    Raises:
+        ValueError: If no model configuration is found
+
+    Example:
+        >>> default_model = get_llm_model()
+        >>> text_model = get_llm_model("text_parsing")
+        >>> vision_model = get_llm_model("vision_analysis")
+    """
+    # Try to get task-specific model if task_type is provided
+    if task_type:
+        task_model = get_config_value(f"llm.models.{task_type}")
+        if task_model:
+            return task_model
+
+    # Fall back to default_model (new format)
+    default_model = get_config_value("llm.default_model")
+    if default_model:
+        return default_model
+
+    # Fall back to legacy 'model' field (old format)
+    legacy_model = get_config_value("llm.model")
+    if legacy_model:
+        return legacy_model
+
+    # If no model found, raise error
+    raise ValueError(
+        "No LLM model configured. Please ensure 'llm.default_model' or 'llm.model' is set in config.json"
+    )

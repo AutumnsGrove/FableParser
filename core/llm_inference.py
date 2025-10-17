@@ -14,7 +14,7 @@ from typing import Optional, Dict, Any
 import anthropic
 
 from utils.secrets_handler import get_key
-from utils.config_handler import get_config_value
+from utils.config_handler import get_config_value, get_llm_model
 
 
 class LLMInference:
@@ -46,8 +46,8 @@ class LLMInference:
         else:
             raise ValueError(f"Unsupported provider: {provider}")
 
-        # Load default model from config
-        self.default_model = get_config_value("llm.model")
+        # Load default model from config (uses new flexible configuration)
+        self.default_model = get_llm_model()
 
         # Initialize provider-specific client
         self.client = self._initialize_client()
@@ -57,6 +57,7 @@ class LLMInference:
         text: str,
         prompt: str,
         model: Optional[str] = None,
+        task_type: str = "text_parsing",
         max_tokens: int = 4000
     ) -> Dict[str, Any]:
         """
@@ -65,7 +66,9 @@ class LLMInference:
         Args:
             text: The OCR-extracted text to analyze
             prompt: The prompt template for text analysis
-            model: Optional model override (uses config default if None)
+            model: Optional model override (uses task-specific or default if None)
+            task_type: Task type for config lookup (default: "text_parsing")
+                      Used to find task-specific model in config if model is None
             max_tokens: Maximum tokens for the response (default: 4000)
 
         Returns:
@@ -78,8 +81,11 @@ class LLMInference:
             ValueError: If the API request fails
             json.JSONDecodeError: If the response cannot be parsed as JSON
         """
-        # Use provided model or default from config
-        model_name = model or self.default_model
+        # Determine model to use: explicit > task-specific > default
+        if model:
+            model_name = model
+        else:
+            model_name = get_llm_model(task_type)
 
         # Combine the text with the prompt
         full_prompt = f"{prompt}\n\nEXTRACTED TEXT FROM SCREENSHOT:\n\n{text}"
@@ -119,6 +125,7 @@ class LLMInference:
         image_path: str,
         prompt: str,
         model: Optional[str] = None,
+        task_type: str = "vision_analysis",
         max_tokens: int = 4000
     ) -> Dict[str, Any]:
         """
@@ -127,7 +134,9 @@ class LLMInference:
         Args:
             image_path: Path to the screenshot image file
             prompt: The prompt template for vision analysis
-            model: Optional model override (uses config default if None)
+            model: Optional model override (uses task-specific or default if None)
+            task_type: Task type for config lookup (default: "vision_analysis")
+                      Used to find task-specific model in config if model is None
             max_tokens: Maximum tokens for the response (default: 4000)
 
         Returns:
@@ -164,8 +173,11 @@ class LLMInference:
         # Encode image to base64
         base64_image, media_type = self._encode_image(image_path)
 
-        # Use provided model or default from config
-        model_name = model or self.default_model
+        # Determine model to use: explicit > task-specific > default
+        if model:
+            model_name = model
+        else:
+            model_name = get_llm_model(task_type)
 
         try:
             # Make API request to Anthropic
