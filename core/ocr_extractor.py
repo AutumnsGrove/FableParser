@@ -14,7 +14,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytesseract
-from PIL import Image
+from PIL import Image, ImageFile
+
+# Increase PIL's max image pixels limit to handle very large stitched screenshots
+# Default is 89,478,485 pixels (~9000x9000). We'll increase to ~25000x25000
+Image.MAX_IMAGE_PIXELS = 625_000_000
+
+# Allow PIL to load truncated/damaged images (common with huge JPEGs)
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class OCRExtractor:
@@ -54,24 +61,37 @@ class OCRExtractor:
             Preprocessed image as numpy array
 
         """
-        # Read image
-        img = cv2.imread(image_path)
-        if img is None:
-            raise ValueError(f"Could not read image: {image_path}")
+        try:
+            print(f"🔍 Loading image with OpenCV...")
+            # Read image
+            img = cv2.imread(image_path)
+            if img is None:
+                raise ValueError(f"Could not read image: {image_path}")
 
-        # Convert to grayscale
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            print(f"✅ OpenCV successfully loaded image: shape={img.shape}")
 
-        # For dark mode screenshots, invert colors so text is black on white
-        # Check if the image is dark mode by looking at average pixel value
-        avg_brightness = np.mean(gray)
-        if avg_brightness < 127:  # Dark mode (dark background)
-            gray = cv2.bitwise_not(gray)  # Invert to make text black on white
+            # Convert to grayscale
+            print(f"🔍 Converting to grayscale...")
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        # Light denoising to reduce noise while preserving text clarity
-        processed = cv2.fastNlMeansDenoising(gray, None, h=10, templateWindowSize=7, searchWindowSize=21)
+            # For dark mode screenshots, invert colors so text is black on white
+            # Check if the image is dark mode by looking at average pixel value
+            avg_brightness = np.mean(gray)
+            print(f"📊 Average brightness: {avg_brightness:.1f} ({'dark mode' if avg_brightness < 127 else 'light mode'})")
+            if avg_brightness < 127:  # Dark mode (dark background)
+                print(f"🔄 Inverting colors for dark mode...")
+                gray = cv2.bitwise_not(gray)  # Invert to make text black on white
 
-        return processed
+            # Light denoising to reduce noise while preserving text clarity
+            print(f"🔍 Applying denoising filter...")
+            processed = cv2.fastNlMeansDenoising(gray, None, h=10, templateWindowSize=7, searchWindowSize=21)
+
+            print(f"✅ Preprocessing complete")
+            return processed
+
+        except Exception as e:
+            print(f"❌ OpenCV preprocessing failed: {type(e).__name__}: {str(e)}")
+            raise
 
     def _get_text_with_confidence(self, image_array: np.ndarray) -> list[tuple[str, float]]:
         """
@@ -114,9 +134,234 @@ class OCRExtractor:
 
         return text_with_conf
 
+    def _load_image_robust(self, image_path: str):
+        """
+        Load image with multiple fallback strategies for corrupted/huge files.
+
+        Returns: (numpy_array, width, height)
+        """
+        # Strategy 1: Try PIL with truncated image support
+        print(f"🔍 Attempting to load with PIL (truncated image support enabled)...")
+        try:
+            pil_img = Image.open(image_path)
+            width, height = pil_img.size
+            print(f"📐 Image dimensions: {width}x{height}px")
+
+            # Force load and convert
+            pil_img.load()  # Force full load
+            img_array = np.array(pil_img)
+            pil_img.close()
+            print(f"✅ PIL loaded successfully: {img_array.shape}")
+            return img_array, width, height
+        except Exception as e:
+            print(f"⚠️  PIL failed: {e}")
+
+        # Strategy 2: Try OpenCV
+        print(f"🔍 Attempting to load with OpenCV...")
+        try:
+            img_array = cv2.imread(image_path, cv2.IMREAD_COLOR)
+            if img_array is not None:
+                height, width = img_array.shape[:2]
+                # Convert BGR to RGB for consistency
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)
+                print(f"✅ OpenCV loaded successfully: {img_array.shape}")
+                return img_array, width, height
+        except Exception as e:
+            print(f"⚠️  OpenCV failed: {e}")
+
+        # Strategy 3: Try converting JPEG to PNG first using imagemagick (if available)
+        print(f"🔍 Attempting to repair image by converting to PNG...")
+        try:
+            import subprocess
+            temp_png = str(Path(image_path).with_suffix('.repaired.png'))
+
+            # Try using ImageMagick's convert command
+            result = subprocess.run(
+                ['magick', 'convert', image_path, temp_png],
+                capture_output=True,
+                timeout=60
+            )
+
+            if result.returncode == 0 and os.path.exists(temp_png):
+                print(f"✅ Repaired image saved to {temp_png}")
+                # Now try loading the repaired PNG
+                pil_img = Image.open(temp_png)
+                width, height = pil_img.size
+                img_array = np.array(pil_img)
+                pil_img.close()
+                print(f"✅ Repaired image loaded: {img_array.shape}")
+                return img_array, width, height
+        except Exception as e:
+            print(f"⚠️  Image repair failed: {e}")
+
+        raise ValueError(f"All image loading strategies failed for {image_path}")
+
+    def _convert_jpeg_to_png(self, image_path: str) -> str:
+        """
+        Convert JPEG to PNG using system tools for better compatibility.
+
+        Returns: path to converted PNG file
+        """
+        # Skip if already PNG
+        if image_path.lower().endswith('.png'):
+            return image_path
+
+        png_path = str(Path(image_path).with_suffix('.converted.png'))
+
+        print(f"🔄 Attempting to convert JPEG to PNG for better compatibility...")
+
+        # Strategy 1: Try macOS built-in sips command (very robust!)
+        try:
+            import subprocess
+            print(f"🔍 Trying macOS sips command...")
+            result = subprocess.run(
+                ['sips', '-s', 'format', 'png', image_path, '--out', png_path],
+                capture_output=True,
+                timeout=120,
+                text=True
+            )
+
+            if result.returncode == 0 and os.path.exists(png_path):
+                # Verify the converted file
+                test_img = Image.open(png_path)
+                w, h = test_img.size
+                test_img.close()
+                print(f"✅ SIPS conversion successful: {w}x{h}px PNG created")
+                return png_path
+            else:
+                print(f"⚠️  SIPS failed: {result.stderr}")
+        except Exception as e:
+            print(f"⚠️  SIPS conversion failed: {e}")
+
+        # Strategy 2: Try ImageMagick if available
+        try:
+            import subprocess
+            print(f"🔍 Trying ImageMagick convert...")
+            result = subprocess.run(
+                ['convert', image_path, png_path],
+                capture_output=True,
+                timeout=120,
+                text=True
+            )
+
+            if result.returncode == 0 and os.path.exists(png_path):
+                test_img = Image.open(png_path)
+                w, h = test_img.size
+                test_img.close()
+                print(f"✅ ImageMagick conversion successful: {w}x{h}px PNG created")
+                return png_path
+            else:
+                print(f"⚠️  ImageMagick failed: {result.stderr}")
+        except Exception as e:
+            print(f"⚠️  ImageMagick conversion failed: {e}")
+
+        # Strategy 3: Use Python imageio (different JPEG decoder)
+        try:
+            import imageio.v3 as iio
+            print(f"🔍 Trying imageio library...")
+            img_data = iio.imread(image_path)
+            iio.imwrite(png_path, img_data)
+
+            if os.path.exists(png_path):
+                test_img = Image.open(png_path)
+                w, h = test_img.size
+                test_img.close()
+                print(f"✅ imageio conversion successful: {w}x{h}px PNG created")
+                return png_path
+        except ImportError:
+            print(f"⚠️  imageio not installed")
+        except Exception as e:
+            print(f"⚠️  imageio conversion failed: {e}")
+
+        # If all conversions fail, return original path and hope for the best
+        print(f"⚠️  All conversion attempts failed, will try with original JPEG")
+        return image_path
+
+    def split_large_image(self, image_path: str, max_height: int = 8000) -> list[str]:
+        """
+        Split a very large image into horizontal bands for processing.
+
+        This is necessary for extremely tall stitched screenshots that exceed
+        PIL's processing limits when resizing.
+
+        Uses multiple loading strategies for robust handling of corrupted/huge images.
+
+        Args:
+            image_path: Path to the large image
+            max_height: Maximum height per chunk in pixels (default: 8000)
+
+        Returns:
+            List of paths to chunk image files (temp files that should be cleaned up)
+
+        Example:
+            >>> extractor = OCRExtractor()
+            >>> chunks = extractor.split_large_image("huge_screenshot.png")
+            >>> # chunks = ["huge_screenshot.chunk000.png", "huge_screenshot.chunk001.png", ...]
+        """
+        try:
+            print(f"🔍 Checking if image needs splitting...")
+
+            # First, try to convert JPEG to PNG if needed
+            working_path = self._convert_jpeg_to_png(image_path)
+
+            # Get dimensions
+            with Image.open(working_path) as img:
+                width, height = img.size
+
+            print(f"📐 Image dimensions: {width}x{height}px")
+
+            if height <= max_height:
+                # No splitting needed
+                print(f"✅ Image height ({height}px) is within limits, no splitting needed")
+                return [working_path]
+
+            # Calculate number of chunks needed
+            num_chunks = (height + max_height - 1) // max_height  # Ceiling division
+
+            print(f"✂️  Splitting {height}px tall image into {num_chunks} chunks of ~{max_height}px each...")
+
+            # Load image with robust fallback strategies
+            img_array, width, height = self._load_image_robust(working_path)
+
+            chunk_paths = []
+
+            print(f"🔍 Creating {num_chunks} chunk files...")
+            for i in range(num_chunks):
+                # Calculate boundaries for this chunk
+                top = i * max_height
+                bottom = min((i + 1) * max_height, height)
+                chunk_height = bottom - top
+
+                # Slice this chunk using numpy (super fast!)
+                chunk_array = img_array[top:bottom, :, :]
+
+                # Convert back to PIL Image for saving
+                chunk_pil = Image.fromarray(chunk_array)
+
+                # Save chunk to temp file (use working_path for naming)
+                chunk_path = str(Path(working_path).with_suffix(f'.chunk{i:03d}.png'))
+                chunk_pil.save(chunk_path, 'PNG')
+                chunk_paths.append(chunk_path)
+
+                print(f"  ✓ Chunk {i+1}/{num_chunks}: {width}x{chunk_height}px → {os.path.basename(chunk_path)}")
+
+            # Release memory
+            del img_array
+
+            print(f"✅ Split complete: {num_chunks} chunks ready for OCR")
+            return chunk_paths
+
+        except Exception as e:
+            print(f"❌ Image splitting failed: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise
+
     def extract_text(self, image_path: str, debug: bool = False) -> str:
         """
         Extract all text from an image using OCR with Tesseract 5.
+
+        Automatically handles very large images by splitting them into chunks.
 
         Args:
             image_path: Path to the image file
@@ -139,35 +384,70 @@ class OCRExtractor:
         if not os.path.exists(image_path):
             raise FileNotFoundError(f"Image file not found: {image_path}")
 
-        print(f"🔍 Preprocessing image {os.path.basename(image_path)}...")
+        # Check if image needs to be split into chunks
+        chunk_paths = self.split_large_image(image_path, max_height=8000)
+        need_cleanup = len(chunk_paths) > 1  # Clean up temp files if we split
+
         try:
-            # Preprocess image with OpenCV
-            processed_img = self._preprocess_image_cv2(image_path)
+            all_text = []
 
-            # Run OCR with Tesseract
-            print(f"🔍 Running Tesseract OCR on {os.path.basename(image_path)}...")
-            results_with_confidence = self._get_text_with_confidence(processed_img)
+            # Process each chunk
+            for chunk_idx, chunk_path in enumerate(chunk_paths, 1):
+                if len(chunk_paths) > 1:
+                    print(f"\n📄 Processing chunk {chunk_idx}/{len(chunk_paths)}...")
 
-            # Results are already sorted top-to-bottom by line_num from Tesseract
-            extracted_text = "\n".join([text for text, _ in results_with_confidence])
+                print(f"🔍 Preprocessing image {os.path.basename(chunk_path)}...")
+                # Preprocess image with OpenCV
+                processed_img = self._preprocess_image_cv2(chunk_path)
 
-            print(f"✅ Extracted {len(extracted_text)} characters of text from {len(results_with_confidence)} lines")
+                # Run OCR with Tesseract
+                print(f"🔍 Running Tesseract OCR on {os.path.basename(chunk_path)}...")
+                results_with_confidence = self._get_text_with_confidence(processed_img)
 
-            # Debug mode: save extracted text with confidence scores
-            if debug:
-                debug_file = str(Path(image_path).with_suffix('.ocr_debug.txt'))
-                with open(debug_file, 'w', encoding='utf-8') as f:
-                    f.write("=== OCR EXTRACTED TEXT ===\n\n")
-                    f.write(extracted_text)
-                    f.write("\n\n=== DETAILED RESULTS WITH CONFIDENCE ===\n\n")
-                    for i, (text, conf) in enumerate(results_with_confidence, 1):
-                        f.write(f"{i}. [{conf:.2%}] {text}\n")
-                print(f"📝 Debug info saved to {debug_file}")
+                # Results are already sorted top-to-bottom by line_num from Tesseract
+                extracted_text = "\n".join([text for text, _ in results_with_confidence])
 
-            return extracted_text
+                print(f"✅ Extracted {len(extracted_text)} characters of text from {len(results_with_confidence)} lines")
+
+                all_text.append(extracted_text)
+
+                # Debug mode: save extracted text with confidence scores (per chunk)
+                if debug:
+                    debug_file = str(Path(chunk_path).with_suffix('.ocr_debug.txt'))
+                    with open(debug_file, 'w', encoding='utf-8') as f:
+                        f.write("=== OCR EXTRACTED TEXT ===\n\n")
+                        f.write(extracted_text)
+                        f.write("\n\n=== DETAILED RESULTS WITH CONFIDENCE ===\n\n")
+                        for i, (text, conf) in enumerate(results_with_confidence, 1):
+                            f.write(f"{i}. [{conf:.2%}] {text}\n")
+                    print(f"📝 Debug info saved to {debug_file}")
+
+            # Combine all chunks
+            combined_text = "\n".join(all_text)
+
+            if len(chunk_paths) > 1:
+                print(f"\n✅ Combined text from {len(chunk_paths)} chunks: {len(combined_text)} total characters")
+
+            return combined_text
 
         except Exception as e:
             raise ValueError(f"OCR processing failed for {image_path}: {str(e)}") from e
+
+        finally:
+            # Clean up temporary chunk files
+            if need_cleanup:
+                print(f"\n🧹 Cleaning up {len(chunk_paths)} temporary chunk files...")
+                for chunk_path in chunk_paths:
+                    if chunk_path != image_path and os.path.exists(chunk_path):
+                        try:
+                            os.remove(chunk_path)
+                            # Also remove debug files for chunks
+                            debug_file = str(Path(chunk_path).with_suffix('.ocr_debug.txt'))
+                            if os.path.exists(debug_file):
+                                os.remove(debug_file)
+                        except Exception as cleanup_error:
+                            print(f"⚠️  Failed to clean up {chunk_path}: {cleanup_error}")
+                print(f"✅ Cleanup complete")
 
     def preprocess_image(self, image_path: str, max_dimension: int = 4000) -> str:
         """
@@ -185,27 +465,40 @@ class OCRExtractor:
             >>> processed_path = extractor.preprocess_image("huge_screenshot.png")
             >>> text = extractor.extract_text(processed_path)
         """
-        img = Image.open(image_path)
-        width, height = img.size
+        # Get file info first
+        file_size_mb = os.path.getsize(image_path) / (1024 * 1024)
+        print(f"📊 Image file size: {file_size_mb:.2f} MB")
 
-        # Check if image is too large
-        if width <= max_dimension and height <= max_dimension:
-            print(f"✅ Image size OK: {width}x{height}")
-            return image_path
+        try:
+            print(f"🔍 Attempting to open image with PIL...")
+            img = Image.open(image_path)
+            print(f"✅ PIL successfully opened the image")
 
-        # Calculate resize ratio to fit within max_dimension
-        ratio = min(max_dimension / width, max_dimension / height)
-        new_width = int(width * ratio)
-        new_height = int(height * ratio)
+            width, height = img.size
+            print(f"📐 Image dimensions: {width}x{height} ({width*height:,} total pixels)")
 
-        print(f"📐 Resizing image from {width}x{height} to {new_width}x{new_height}")
+            # Check if image is too large
+            if width <= max_dimension and height <= max_dimension:
+                print(f"✅ Image size OK: {width}x{height}")
+                return image_path
 
-        # Resize with high-quality downsampling
-        resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            # Calculate resize ratio to fit within max_dimension
+            ratio = min(max_dimension / width, max_dimension / height)
+            new_width = int(width * ratio)
+            new_height = int(height * ratio)
 
-        # Save to temporary file
-        temp_path = str(Path(image_path).with_suffix('.processed.png'))
-        resized.save(temp_path, 'PNG', optimize=True)
+            print(f"📐 Resizing image from {width}x{height} to {new_width}x{new_height}")
 
-        print(f"✅ Saved preprocessed image to {temp_path}")
-        return temp_path
+            # Resize with high-quality downsampling
+            resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+            # Save to temporary file
+            temp_path = str(Path(image_path).with_suffix('.processed.png'))
+            resized.save(temp_path, 'PNG', optimize=True)
+
+            print(f"✅ Saved preprocessed image to {temp_path}")
+            return temp_path
+
+        except Exception as e:
+            print(f"❌ PIL failed to open image: {type(e).__name__}: {str(e)}")
+            raise

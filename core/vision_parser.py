@@ -126,17 +126,12 @@ def parse_screenshot(image_path: str, use_ocr: bool = True) -> List[Dict[str, An
 
     if use_ocr:
         # NEW APPROACH: OCR + Text Analysis
-        # Step 1: Extract text using OCR
+        # Step 1: Extract text using OCR (handles splitting internally for large images)
         try:
             ocr = OCRExtractor()
-            # Preprocess image if needed (resize large images)
-            processed_path = ocr.preprocess_image(image_path, max_dimension=4000)
             # Extract text from image (debug=True saves OCR output to file)
-            extracted_text = ocr.extract_text(processed_path, debug=True)
-
-            # Clean up temporary file if created
-            if processed_path != image_path and os.path.exists(processed_path):
-                os.remove(processed_path)
+            # This automatically splits very large images into chunks if needed
+            extracted_text = ocr.extract_text(image_path, debug=True)
 
         except Exception as e:
             raise ValueError(f"Failed to extract text from screenshot: {e}")
