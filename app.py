@@ -8,10 +8,44 @@ interface for uploading screenshots and processing book lists.
 import gradio as gr
 from typing import Tuple, List
 import os
+import yaml
+from pathlib import Path
 
 from core import vision_parser, metadata_enricher
 from core import markdown_generator, raindrop_sync, obsidian_sync
 from utils import config_handler
+
+
+def _check_existing_file(book):
+    """Check if a markdown file already exists for this book and load its metadata."""
+    from core.markdown_generator import _generate_filename
+    from utils.config_handler import get_output_directory
+
+    try:
+        filename = _generate_filename(book)
+        output_dir = get_output_directory()
+        filepath = os.path.join(output_dir, filename)
+
+        if os.path.exists(filepath):
+            # File exists, load existing metadata
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # Extract frontmatter
+            if content.startswith('---'):
+                end_idx = content.find('---', 3)
+                if end_idx != -1:
+                    yaml_content = content[4:end_idx].strip()
+                    existing_data = yaml.safe_load(yaml_content)
+                    if isinstance(existing_data, dict):
+                        # Merge existing metadata with book data
+                        merged = book.copy()
+                        merged.update(existing_data)
+                        return merged, filepath
+
+        return None, None
+    except Exception:
+        return None, None
 
 
 def process_pipeline(
@@ -94,13 +128,21 @@ def process_pipeline(
 
         for completed_enrichments, (idx, book) in enumerate(valid_books, 1):
             try:
-                # Define callback to capture search progress messages
-                def search_progress(msg: str):
-                    log.append(f"    {msg}")
+                # Check if file already exists before making API calls
+                existing_data, existing_path = _check_existing_file(book)
 
-                enriched = metadata_enricher.enrich_book_metadata(book, progress_callback=search_progress)
-                enriched_books.append((idx, enriched))
-                log.append(f"  ✓ Enriched: {enriched.get('title', 'Unknown')}")
+                if existing_data:
+                    # Use existing metadata from file
+                    enriched_books.append((idx, existing_data))
+                    log.append(f"  ⏭️  Skipped: {book.get('title', 'Unknown')} (already exists)")
+                else:
+                    # Define callback to capture search progress messages
+                    def search_progress(msg: str):
+                        log.append(f"    {msg}")
+
+                    enriched = metadata_enricher.enrich_book_metadata(book, progress_callback=search_progress)
+                    enriched_books.append((idx, enriched))
+                    log.append(f"  ✓ Enriched: {enriched.get('title', 'Unknown')}")
             except Exception as e:
                 log.append(f"  ⚠️  Failed to enrich book {idx}: {str(e)}")
                 # Use original book data if enrichment fails
