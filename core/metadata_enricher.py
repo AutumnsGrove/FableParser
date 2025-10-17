@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Rate limiting configuration
 _last_request_time = 0
-MIN_REQUEST_INTERVAL = 1.0  # Minimum 1.0 seconds between requests
+MIN_REQUEST_INTERVAL = 2.5  # Minimum 2.5 seconds between requests
 
 def rate_limit(func):
     """Decorator to rate limit API requests."""
