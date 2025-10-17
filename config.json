@@ -6,7 +6,7 @@
       "text_parsing": "claude-sonnet-4-5-20250929",
       "vision_analysis": "claude-sonnet-4-5-20250929"
     },
-    "max_tokens": 4000,
+    "max_tokens": 8000,
     "temperature": 0.3
   },
   "output": {
