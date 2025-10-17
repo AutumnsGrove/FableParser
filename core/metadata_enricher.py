@@ -9,8 +9,76 @@ from typing import Dict, Any, Optional
 import requests
 import urllib.parse
 import logging
+import time
+from functools import wraps
 
 logger = logging.getLogger(__name__)
+
+# Rate limiting configuration
+_last_request_time = 0
+MIN_REQUEST_INTERVAL = 0.5  # Minimum 0.5 seconds between requests
+
+def rate_limit(func):
+    """Decorator to rate limit API requests."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        global _last_request_time
+        current_time = time.time()
+        elapsed = current_time - _last_request_time
+
+        if elapsed < MIN_REQUEST_INTERVAL:
+            sleep_time = MIN_REQUEST_INTERVAL - elapsed
+            time.sleep(sleep_time)
+
+        result = func(*args, **kwargs)
+        _last_request_time = time.time()
+        return result
+    return wrapper
+
+def retry_on_failure(max_retries=3, backoff_factor=1.0):
+    """
+    Decorator to retry API calls with exponential backoff.
+
+    Args:
+        max_retries: Maximum number of retry attempts
+        backoff_factor: Multiplier for exponential backoff (seconds)
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except requests.exceptions.HTTPError as e:
+                    last_exception = e
+                    # Don't retry on 4xx errors (client errors)
+                    if 400 <= e.response.status_code < 500:
+                        logger.warning(f"Client error (won't retry): {e}")
+                        return None
+
+                    # Retry on 5xx errors (server errors)
+                    if attempt < max_retries - 1:
+                        wait_time = backoff_factor * (2 ** attempt)
+                        logger.warning(f"Server error, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries}): {e}")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"Max retries reached: {e}")
+
+                except requests.exceptions.RequestException as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        wait_time = backoff_factor * (2 ** attempt)
+                        logger.warning(f"Request failed, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries}): {e}")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"Max retries reached: {e}")
+
+            # If we get here, all retries failed
+            return None
+        return wrapper
+    return decorator
 
 # Open Library API requires User-Agent header for regular use
 # https://openlibrary.org/developers/api
@@ -181,9 +249,11 @@ def enrich_book_metadata(book: Dict[str, Any]) -> Dict[str, Any]:
         return enriched_book
 
 
+@rate_limit
+@retry_on_failure(max_retries=3, backoff_factor=1.5)
 def _search_open_library(title: str, author: str) -> Optional[Dict[str, Any]]:
     """
-    Search Open Library by title and author.
+    Search Open Library by title and author with retry logic and rate limiting.
 
     Args:
         title: Book title
@@ -192,35 +262,32 @@ def _search_open_library(title: str, author: str) -> Optional[Dict[str, Any]]:
     Returns:
         First matching book data from Open Library, or None if not found
     """
-    try:
-        # URL encode title and author
-        encoded_title = urllib.parse.quote(title)
-        encoded_author = urllib.parse.quote(author)
+    # URL encode title and author
+    encoded_title = urllib.parse.quote(title)
+    encoded_author = urllib.parse.quote(author)
 
-        # Construct API URL
-        url = f"https://openlibrary.org/search.json?title={encoded_title}&author={encoded_author}"
+    # Construct API URL
+    url = f"https://openlibrary.org/search.json?title={encoded_title}&author={encoded_author}"
 
-        # Make request with timeout and required User-Agent header
-        response = requests.get(url, headers=HEADERS, timeout=10)
-        response.raise_for_status()  # Raise exception for bad status codes
+    # Make request with timeout and required User-Agent header
+    response = requests.get(url, headers=HEADERS, timeout=15)
+    response.raise_for_status()  # Raise exception for bad status codes
 
-        # Parse JSON response
-        data = response.json()
+    # Parse JSON response
+    data = response.json()
 
-        # Return first result if available
-        if data.get('docs') and len(data['docs']) > 0:
-            return data['docs'][0]
+    # Return first result if available
+    if data.get('docs') and len(data['docs']) > 0:
+        return data['docs'][0]
 
-        return None
-
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"Open Library API request failed: {e}")
-        return None
+    return None
 
 
+@rate_limit
+@retry_on_failure(max_retries=3, backoff_factor=1.5)
 def _fetch_edition_details(work_id: str) -> Optional[Dict[str, Any]]:
     """
-    Fetch edition details from Open Library editions endpoint.
+    Fetch edition details from Open Library editions endpoint with retry logic.
 
     Args:
         work_id: Open Library work ID (e.g., "/works/OL17267887W")
@@ -228,53 +295,45 @@ def _fetch_edition_details(work_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Edition metadata with ISBN, publisher, pages, publish_date, or None if not found
     """
-    try:
-        # Construct editions API URL
-        url = f"https://openlibrary.org{work_id}/editions.json"
+    # Construct editions API URL
+    url = f"https://openlibrary.org{work_id}/editions.json"
 
-        # Make request with timeout and required User-Agent header
-        response = requests.get(url, headers=HEADERS, timeout=10)
-        response.raise_for_status()
+    # Make request with timeout and required User-Agent header
+    response = requests.get(url, headers=HEADERS, timeout=15)
+    response.raise_for_status()
 
-        # Parse JSON response
-        data = response.json()
+    # Parse JSON response
+    data = response.json()
 
-        # Get entries (editions list)
-        editions = data.get('entries', [])
+    # Get entries (editions list)
+    editions = data.get('entries', [])
 
-        if not editions:
-            return None
-
-        # Find the edition with the most complete metadata
-        best_edition = None
-        best_score = 0
-
-        for edition in editions:
-            # Score based on available fields
-            score = 0
-            if edition.get('isbn_13'):
-                score += 3
-            if edition.get('isbn_10'):
-                score += 2
-            if edition.get('publishers'):
-                score += 2
-            if edition.get('number_of_pages'):
-                score += 2
-            if edition.get('publish_date'):
-                score += 1
-
-            if score > best_score:
-                best_score = score
-                best_edition = edition
-
-        return best_edition
-
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"Open Library editions API request failed: {e}")
+    if not editions:
         return None
-    except Exception as e:
-        logger.error(f"Error parsing edition details: {e}")
-        return None
+
+    # Find the edition with the most complete metadata
+    best_edition = None
+    best_score = 0
+
+    for edition in editions:
+        # Score based on available fields
+        score = 0
+        if edition.get('isbn_13'):
+            score += 3
+        if edition.get('isbn_10'):
+            score += 2
+        if edition.get('publishers'):
+            score += 2
+        if edition.get('number_of_pages'):
+            score += 2
+        if edition.get('publish_date'):
+            score += 1
+
+        if score > best_score:
+            best_score = score
+            best_edition = edition
+
+    return best_edition
 
 
 def _fetch_book_details(work_id: str) -> Optional[Dict[str, Any]]:

@@ -36,7 +36,8 @@ class OCRExtractor:
         """Lazy initialization of EasyOCR reader to avoid slow startup."""
         if self.reader is None:
             print("🔍 Initializing OCR engine (first time only, may take a moment)...")
-            self.reader = easyocr.Reader(self.languages, gpu=False)
+            # Enable GPU for faster processing (uses MPS on Mac M-series chips)
+            self.reader = easyocr.Reader(self.languages, gpu=True)
 
     def extract_text(self, image_path: str) -> str:
         """
