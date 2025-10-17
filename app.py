@@ -101,7 +101,8 @@ def process_pipeline(
             log.append("  - Unclear image quality")
             log.append("  - Unexpected screenshot format")
             log.append("  - JSON parsing issues")
-            return "\n".join(log), []
+            yield "\n".join(log), []
+            return
 
         log.append("")  # Blank line for readability
 
@@ -120,7 +121,8 @@ def process_pipeline(
         if not valid_books:
             log.append("❌ No valid books to process")
             progress(1.0, desc="❌ No valid books to process")
-            return "\n".join(log), []
+            yield "\n".join(log), []
+            return
 
         # Process each book: enrich + generate file immediately
         total_books = len(valid_books)
@@ -143,6 +145,8 @@ def process_pipeline(
                     # Still add to files list so user can download it
                     if existing_path:
                         files.append(existing_path)
+                        # Yield update to show existing file in UI
+                        yield "\n".join(log), files.copy()
                 else:
                     # Define callback to capture search progress messages
                     def search_progress(msg: str):
@@ -158,6 +162,9 @@ def process_pipeline(
                     filepath = markdown_generator.generate_markdown_file(enriched)
                     files.append(filepath)
                     log.append(f"  ✓ Created: {os.path.basename(filepath)}")
+
+                    # Yield update to show file immediately in UI
+                    yield "\n".join(log), files.copy()
 
                 # Optional syncs
                 if sync_raindrop and config_handler.get_config_value("raindrop.enabled"):
@@ -180,11 +187,11 @@ def process_pipeline(
 
         progress(1.0, desc="🎉 All done!")
         log.append("🎉 All done!")
-        return "\n".join(log), files
+        yield "\n".join(log), files
 
     except Exception as e:
         log.append(f"❌ Error: {str(e)}")
-        return "\n".join(log), []
+        yield "\n".join(log), []
 
 
 def create_interface() -> gr.Blocks:
