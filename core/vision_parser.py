@@ -46,13 +46,22 @@ Extract ALL books with:
    - "Finished" → "read"
    - "Currently Reading" → "currently-reading"
    - "Want to Read" / other → "want-to-read"
+4. **date_started**: Extract start date if visible (optional)
+   - Format: "Jul 16, 2025" or "2025-07-16"
+   - For finished books, this is the first date in "Jul 16, 2025 - Aug 25, 2..."
+5. **date_finished**: Extract finish date if visible (optional)
+   - Only for finished/read books
+   - For finished books, this is the second date in "Jul 16, 2025 - Aug 25, 2..."
+   - If year is cut off (e.g., "Jul 16, 2025 - Aug 25, 2..."), infer the year from date_started
+   - Example: "Jul 16, 2025 - Aug 25, 2..." → date_finished should be "Aug 25, 2025"
 
 CRITICAL RULES:
 - **NEVER use "unknown" for author** - Fable ALWAYS shows the author name
 - If author appears cut off or unclear, try to extract what's visible
 - Look for the line IMMEDIATELY AFTER the title - that's the author
-- Ignore page counts, dates, and other metadata
-- Be precise - extract names exactly as shown
+- Extract dates when visible (especially for finished books)
+- Ignore page counts and other metadata (except dates)
+- Be precise - extract names and dates exactly as shown
 
 OUTPUT FORMAT (raw JSON only, no markdown):
 {
@@ -60,7 +69,9 @@ OUTPUT FORMAT (raw JSON only, no markdown):
     {
       "title": "Colorless Tsukuru Tazaki and His Years of Pilgrimage",
       "author": "Haruki Murakami",
-      "reading_status": "read"
+      "reading_status": "read",
+      "date_started": "Jul 16, 2025",
+      "date_finished": "Aug 25, 2025"
     }
   ]
 }
